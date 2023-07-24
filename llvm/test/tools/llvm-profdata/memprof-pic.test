@@ -1,0 +1,12 @@
+REQUIRES: x86_64-linux
+
+Since the profile contains virtual addresses for the callstack,
+we do not expect the raw binary profile to be deterministic. The
+summary should be deterministic apart from changes to the shared
+libraries linked in which could change the number of segments
+recorded.
+
+To update the inputs used below run Inputs/update_memprof_inputs.sh /path/to/updated/clang
+RUN: not llvm-profdata show --memory %p/Inputs/pic.memprofraw --profiled-binary %p/Inputs/pic.memprofexe -o - 2>&1 | FileCheck %s
+
+CHECK: Unsupported position independent code
