@@ -128,17 +128,28 @@ void LoopUnroll::runOnOperation() {
 /// Unrolls a 'affine.for' op. Returns success if the loop was unrolled,
 /// failure otherwise. The default unroll factor is 4.
 LogicalResult LoopUnroll::runOnAffineForOp(AffineForOp forOp) {
+
+  auto annotateFn = [](unsigned i, Operation *op, OpBuilder builder) {
+    if (i > 0) {
+      auto dictAttr = builder.getDictionaryAttr({
+        {builder.getStringAttr("unrollIndex"), builder.getI64IntegerAttr(i)},
+      });
+      op->setAttr("vecInfo", dictAttr);
+      
+    }
+  };
+
   // Use the function callback if one was provided.
   if (getUnrollFactor)
     return loopUnrollByFactor(forOp, getUnrollFactor(forOp),
-                              /*annotateFn=*/nullptr, cleanUpUnroll);
+                              /*annotateFn=*/annotateFn, cleanUpUnroll);
   // Unroll completely if full loop unroll was specified.
   if (unrollFull)
     return loopUnrollFull(forOp);
   // Otherwise, unroll by the given unroll factor.
   if (unrollUpToFactor)
     return loopUnrollUpToFactor(forOp, unrollFactor);
-  return loopUnrollByFactor(forOp, unrollFactor, /*annotateFn=*/nullptr,
+  return loopUnrollByFactor(forOp, unrollFactor, /*annotateFn=*/annotateFn,
                             cleanUpUnroll);
 }
 
