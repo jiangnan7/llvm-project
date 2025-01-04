@@ -1035,6 +1035,7 @@ static void generateUnrolledLoop(
     // Clone the original body of 'forOp'.
     for (auto it = loopBodyBlock->begin(); it != std::next(srcBlockEnd); it++) {
       Operation *clonedOp = builder.clone(*it, operandMap);
+      it->setAttr("slp.lane",  builder.getI64IntegerAttr(0 /* 0..3 */));
       annotateFn(i, clonedOp, builder);
     }
 

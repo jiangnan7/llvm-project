@@ -131,11 +131,7 @@ LogicalResult LoopUnroll::runOnAffineForOp(AffineForOp forOp) {
 
   auto annotateFn = [](unsigned i, Operation *op, OpBuilder builder) {
     if (i > 0) {
-      auto dictAttr = builder.getDictionaryAttr({
-        {builder.getStringAttr("unrollIndex"), builder.getI64IntegerAttr(i)},
-      });
-      op->setAttr("vecInfo", dictAttr);
-      
+      op->setAttr("slp.lane",  builder.getI64IntegerAttr(i /* 0..3 */));
     }
   };
 
