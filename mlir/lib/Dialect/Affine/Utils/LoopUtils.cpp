@@ -1033,10 +1033,14 @@ static void generateUnrolledLoop(
     }
 
     // Clone the original body of 'forOp'.
+    int group_id = 0;
     for (auto it = loopBodyBlock->begin(); it != std::next(srcBlockEnd); it++) {
       Operation *clonedOp = builder.clone(*it, operandMap);
       it->setAttr("slp.lane",  builder.getI64IntegerAttr(0 /* 0..3 */));
+      it->setAttr("slp.group",  builder.getI64IntegerAttr(group_id /* 0..3 */));
+      clonedOp->setAttr("slp.group",  builder.getI64IntegerAttr(group_id /* 0..3 */));
       annotateFn(i, clonedOp, builder);
+      group_id++;
     }
 
     // Update yielded values.
