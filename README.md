@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+# llvm-project
+=======
 # The LLVM Compiler Infrastructure
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/llvm/llvm-project/badge)](https://securityscorecards.dev/viewer/?uri=github.com/llvm/llvm-project)
@@ -42,3 +45,4 @@ chat](https://discord.gg/xS7Z362),
 
 The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
 participants to all modes of communication within the project.
+>>>>>>> origin/newbranch
