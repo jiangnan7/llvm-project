@@ -7,6 +7,9 @@ declare <2 x i64> @llvm.bswap.v2i64(<2 x i64>)
 declare i32 @llvm.cttz.i32(i32, i1)
 declare i33 @llvm.cttz.i33(i33, i1)
 declare i32 @llvm.ctlz.i32(i32, i1)
+declare i8 @llvm.umax.i8(i8, i8)
+declare i8 @llvm.uadd.sat.i8(i8, i8)
+declare i8 @llvm.ssub.sat.i8(i8, i8)
 declare i33 @llvm.ctlz.i33(i33, i1)
 declare i8 @llvm.ctpop.i8(i8)
 declare i11 @llvm.ctpop.i11(i11)
@@ -16,6 +19,7 @@ declare <2 x i32> @llvm.ctpop.v2i32(<2 x i32>)
 declare i8 @llvm.bitreverse.i8(i8)
 declare <2 x i8> @llvm.bitreverse.v2i8(<2 x i8>)
 declare void @use6(i6)
+declare void @use8(i8)
 
 define i1 @bswap_eq_i16(i16 %x) {
 ; CHECK-LABEL: @bswap_eq_i16(
@@ -39,7 +43,7 @@ define i1 @bswap_ne_i32(i32 %x) {
 
 define <2 x i1> @bswap_eq_v2i64(<2 x i64> %x) {
 ; CHECK-LABEL: @bswap_eq_v2i64(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp eq <2 x i64> [[X:%.*]], <i64 216172782113783808, i64 216172782113783808>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp eq <2 x i64> [[X:%.*]], splat (i64 216172782113783808)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %bs = tail call <2 x i64> @llvm.bswap.v2i64(<2 x i64> %x)
@@ -69,7 +73,7 @@ define i1 @ctlz_eq_zero_i32(i32 %x) {
 
 define <2 x i1> @ctlz_ne_zero_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @ctlz_ne_zero_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt <2 x i32> [[A:%.*]], <i32 -1, i32 -1>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt <2 x i32> [[A:%.*]], splat (i32 -1)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %x = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %a, i1 false)
@@ -89,7 +93,7 @@ define i1 @ctlz_eq_bw_minus_1_i32(i32 %x) {
 
 define <2 x i1> @ctlz_ne_bw_minus_1_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @ctlz_ne_bw_minus_1_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[A:%.*]], <i32 1, i32 1>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[A:%.*]], splat (i32 1)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %x = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %a, i1 false)
@@ -110,8 +114,8 @@ define i1 @ctlz_eq_other_i32(i32 %x) {
 
 define <2 x i1> @ctlz_ne_other_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @ctlz_ne_other_v2i32(
-; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], <i32 -128, i32 -128>
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], <i32 128, i32 128>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], splat (i32 -128)
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], splat (i32 128)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %x = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %a, i1 false)
@@ -121,7 +125,7 @@ define <2 x i1> @ctlz_ne_other_v2i32(<2 x i32> %a) {
 
 define i1 @ctlz_eq_other_i32_multiuse(i32 %x, ptr %p) {
 ; CHECK-LABEL: @ctlz_eq_other_i32_multiuse(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0:![0-9]+]]
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store i32 [[LZ]], ptr [[P:%.*]], align 4
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i32 [[LZ]], 24
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -174,7 +178,7 @@ define i1 @ctlz_ugt_other_i32(i32 %x) {
 
 define i1 @ctlz_ugt_other_multiuse_i32(i32 %x, ptr %p) {
 ; CHECK-LABEL: @ctlz_ugt_other_multiuse_i32(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0]]
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store i32 [[LZ]], ptr [[P:%.*]], align 4
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 [[X]], 32768
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -207,7 +211,7 @@ define <2 x i1> @ctlz_ult_one_v2i32(<2 x i32> %x) {
 
 define <2 x i1> @ctlz_ult_other_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @ctlz_ult_other_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X:%.*]], <i32 65535, i32 65535>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X:%.*]], splat (i32 65535)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %lz = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %x, i1 false)
@@ -217,9 +221,9 @@ define <2 x i1> @ctlz_ult_other_v2i32(<2 x i32> %x) {
 
 define <2 x i1> @ctlz_ult_other_multiuse_v2i32(<2 x i32> %x, ptr %p) {
 ; CHECK-LABEL: @ctlz_ult_other_multiuse_v2i32(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i32 0, 33) <2 x i32> @llvm.ctlz.v2i32(<2 x i32> [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store <2 x i32> [[LZ]], ptr [[P:%.*]], align 8
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X]], <i32 65535, i32 65535>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X]], splat (i32 65535)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %lz = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %x, i1 false)
@@ -230,7 +234,7 @@ define <2 x i1> @ctlz_ult_other_multiuse_v2i32(<2 x i32> %x, ptr %p) {
 
 define <2 x i1> @ctlz_ult_bw_minus_one_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @ctlz_ult_bw_minus_one_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X:%.*]], <i32 1, i32 1>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt <2 x i32> [[X:%.*]], splat (i32 1)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %lz = tail call <2 x i32> @llvm.ctlz.v2i32(<2 x i32> %x, i1 false)
@@ -281,7 +285,7 @@ define i1 @cttz_eq_zero_i33(i33 %x) {
 
 define <2 x i1> @cttz_ne_zero_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @cttz_ne_zero_v2i32(
-; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], <i32 1, i32 1>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], splat (i32 1)
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp eq <2 x i32> [[TMP1]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
@@ -302,7 +306,7 @@ define i1 @cttz_eq_bw_minus_1_i33(i33 %x) {
 
 define <2 x i1> @cttz_ne_bw_minus_1_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @cttz_ne_bw_minus_1_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[A:%.*]], <i32 -2147483648, i32 -2147483648>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[A:%.*]], splat (i32 -2147483648)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %x = tail call <2 x i32> @llvm.cttz.v2i32(<2 x i32> %a, i1 false)
@@ -323,8 +327,8 @@ define i1 @cttz_eq_other_i33(i33 %x) {
 
 define <2 x i1> @cttz_ne_other_v2i32(<2 x i32> %a) {
 ; CHECK-LABEL: @cttz_ne_other_v2i32(
-; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], <i32 31, i32 31>
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], <i32 16, i32 16>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[A:%.*]], splat (i32 31)
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], splat (i32 16)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %x = tail call <2 x i32> @llvm.cttz.v2i32(<2 x i32> %a, i1 false)
@@ -334,7 +338,7 @@ define <2 x i1> @cttz_ne_other_v2i32(<2 x i32> %a) {
 
 define i1 @cttz_eq_other_i33_multiuse(i33 %x, ptr %p) {
 ; CHECK-LABEL: @cttz_eq_other_i33_multiuse(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false), !range [[RNG1:![0-9]+]]
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i33 0, 34) i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store i33 [[TZ]], ptr [[P:%.*]], align 4
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i33 [[TZ]], 4
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -380,9 +384,9 @@ define i1 @cttz_ugt_other_i33(i33 %x) {
 
 define i1 @cttz_ugt_other_multiuse_i33(i33 %x, ptr %p) {
 ; CHECK-LABEL: @cttz_ugt_other_multiuse_i33(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false), !range [[RNG1]]
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i33 0, 34) i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store i33 [[TZ]], ptr [[P:%.*]], align 4
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i33 [[TZ]], 16
+; CHECK-NEXT:    [[CMP:%.*]] = icmp samesign ugt i33 [[TZ]], 16
 ; CHECK-NEXT:    ret i1 [[CMP]]
 ;
   %tz = tail call i33 @llvm.cttz.i33(i33 %x, i1 false)
@@ -413,7 +417,7 @@ define <2 x i1> @cttz_ult_one_v2i32(<2 x i32> %x) {
 
 define <2 x i1> @cttz_ult_other_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @cttz_ult_other_v2i32(
-; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X:%.*]], <i32 65535, i32 65535>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X:%.*]], splat (i32 65535)
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
@@ -424,9 +428,9 @@ define <2 x i1> @cttz_ult_other_v2i32(<2 x i32> %x) {
 
 define <2 x i1> @cttz_ult_other_multiuse_v2i32(<2 x i32> %x, ptr %p) {
 ; CHECK-LABEL: @cttz_ult_other_multiuse_v2i32(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call <2 x i32> @llvm.cttz.v2i32(<2 x i32> [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i32 0, 33) <2 x i32> @llvm.cttz.v2i32(<2 x i32> [[X:%.*]], i1 false)
 ; CHECK-NEXT:    store <2 x i32> [[TZ]], ptr [[P:%.*]], align 8
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ult <2 x i32> [[TZ]], <i32 16, i32 16>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp samesign ult <2 x i32> [[TZ]], splat (i32 16)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %tz = tail call <2 x i32> @llvm.cttz.v2i32(<2 x i32> %x, i1 false)
@@ -437,7 +441,7 @@ define <2 x i1> @cttz_ult_other_multiuse_v2i32(<2 x i32> %x, ptr %p) {
 
 define <2 x i1> @cttz_ult_bw_minus_one_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @cttz_ult_bw_minus_one_v2i32(
-; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X:%.*]], <i32 2147483647, i32 2147483647>
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i32> [[X:%.*]], splat (i32 2147483647)
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[TMP1]], zeroinitializer
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
@@ -488,7 +492,7 @@ define i1 @ctpop_eq_bitwidth_i8(i8 %x) {
 
 define <2 x i1> @ctpop_ne_bitwidth_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @ctpop_ne_bitwidth_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[X:%.*]], <i32 -1, i32 -1>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[X:%.*]], splat (i32 -1)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %pop = tail call <2 x i32> @llvm.ctpop.v2i32(<2 x i32> %x)
@@ -498,7 +502,7 @@ define <2 x i1> @ctpop_ne_bitwidth_v2i32(<2 x i32> %x) {
 
 define i1 @ctpop_ugt_bitwidth_minus_one_i8(i8 %x, ptr %p) {
 ; CHECK-LABEL: @ctpop_ugt_bitwidth_minus_one_i8(
-; CHECK-NEXT:    [[POP:%.*]] = tail call i8 @llvm.ctpop.i8(i8 [[X:%.*]]), !range [[RNG2:![0-9]+]]
+; CHECK-NEXT:    [[POP:%.*]] = tail call range(i8 0, 9) i8 @llvm.ctpop.i8(i8 [[X:%.*]])
 ; CHECK-NEXT:    store i8 [[POP]], ptr [[P:%.*]], align 1
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i8 [[X]], -1
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -511,7 +515,7 @@ define i1 @ctpop_ugt_bitwidth_minus_one_i8(i8 %x, ptr %p) {
 
 define <2 x i1> @ctpop_ult_bitwidth_v2i32(<2 x i32> %x) {
 ; CHECK-LABEL: @ctpop_ult_bitwidth_v2i32(
-; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[X:%.*]], <i32 -1, i32 -1>
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ne <2 x i32> [[X:%.*]], splat (i32 -1)
 ; CHECK-NEXT:    ret <2 x i1> [[CMP]]
 ;
   %pop = tail call <2 x i32> @llvm.ctpop.v2i32(<2 x i32> %x)
@@ -559,7 +563,7 @@ define i1 @trunc_cttz_ult_other_i33_i6(i33 %x) {
 
 define i1 @trunc_cttz_ult_other_i33_i5(i33 %x) {
 ; CHECK-LABEL: @trunc_cttz_ult_other_i33_i5(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 true), !range [[RNG1]]
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i33 0, 34) i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 true)
 ; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i33 [[TZ]] to i5
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i5 [[TRUNC]], 7
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -586,7 +590,7 @@ define i1 @trunc_cttz_true_ult_other_i32_i5(i32 %x) {
 
 define i1 @trunc_cttz_false_ult_other_i32_i5(i32 %x) {
 ; CHECK-LABEL: @trunc_cttz_false_ult_other_i32_i5(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i32 @llvm.cttz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0]]
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.cttz.i32(i32 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i32 [[TZ]] to i5
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i5 [[TRUNC]], 7
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -613,8 +617,8 @@ define i1 @trunc_cttz_false_ult_other_i32_i6(i32 %x) {
 
 define i1 @trunc_cttz_false_ult_other_i32_i6_extra_use(i32 %x) {
 ; CHECK-LABEL: @trunc_cttz_false_ult_other_i32_i6_extra_use(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i32 @llvm.cttz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0]]
-; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i32 [[TZ]] to i6
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.cttz.i32(i32 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[TRUNC:%.*]] = trunc nuw i32 [[TZ]] to i6
 ; CHECK-NEXT:    call void @use6(i6 [[TRUNC]])
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i6 [[TRUNC]], 7
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -663,7 +667,7 @@ define i1 @trunc_ctlz_ugt_other_i33_i6(i33 %x) {
 
 define i1 @trunc_ctlz_ugt_other_i33_i5(i33 %x) {
 ; CHECK-LABEL: @trunc_ctlz_ugt_other_i33_i5(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call i33 @llvm.ctlz.i33(i33 [[X:%.*]], i1 true), !range [[RNG1]]
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i33 0, 34) i33 @llvm.ctlz.i33(i33 [[X:%.*]], i1 true)
 ; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i33 [[LZ]] to i5
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i5 [[TRUNC]], 4
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -689,7 +693,7 @@ define i1 @trunc_ctlz_true_ugt_other_i32_i5(i32 %x) {
 
 define i1 @trunc_ctlz_false_ugt_other_i32_i5(i32 %x) {
 ; CHECK-LABEL: @trunc_ctlz_false_ugt_other_i32_i5(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0]]
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i32 [[LZ]] to i5
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i5 [[TRUNC]], 4
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -715,8 +719,8 @@ define i1 @trunc_ctlz_false_ugt_other_i32_i6(i32 %x) {
 
 define i1 @trunc_ctlz_false_ugt_other_i32_i6_extra_use(i32 %x) {
 ; CHECK-LABEL: @trunc_ctlz_false_ugt_other_i32_i6_extra_use(
-; CHECK-NEXT:    [[LZ:%.*]] = tail call i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false), !range [[RNG0]]
-; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i32 [[LZ]] to i6
+; CHECK-NEXT:    [[LZ:%.*]] = tail call range(i32 0, 33) i32 @llvm.ctlz.i32(i32 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[TRUNC:%.*]] = trunc nuw i32 [[LZ]] to i6
 ; CHECK-NEXT:    call void @use6(i6 [[TRUNC]])
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i6 [[TRUNC]], 4
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -754,7 +758,7 @@ define i1 @trunc_ctpop_eq_bitwidth_i8(i8 %x) {
 
 define i1 @trunc_negative_destbits_not_enough(i33 %x) {
 ; CHECK-LABEL: @trunc_negative_destbits_not_enough(
-; CHECK-NEXT:    [[TZ:%.*]] = tail call i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false), !range [[RNG1]]
+; CHECK-NEXT:    [[TZ:%.*]] = tail call range(i33 0, 34) i33 @llvm.cttz.i33(i33 [[X:%.*]], i1 false)
 ; CHECK-NEXT:    [[TRUNC:%.*]] = trunc i33 [[TZ]] to i4
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i4 [[TRUNC]], 7
 ; CHECK-NEXT:    ret i1 [[CMP]]
@@ -786,10 +790,9 @@ define i1 @bitreverse_ult_22_fail_not_equality_pred(i8 %x) {
   ret i1 %z
 }
 
-
 define <2 x i1> @bitreverse_vec_eq_2_2(<2 x i8> %x) {
 ; CHECK-LABEL: @bitreverse_vec_eq_2_2(
-; CHECK-NEXT:    [[Z:%.*]] = icmp eq <2 x i8> [[X:%.*]], <i8 64, i8 64>
+; CHECK-NEXT:    [[Z:%.*]] = icmp eq <2 x i8> [[X:%.*]], splat (i8 64)
 ; CHECK-NEXT:    ret <2 x i1> [[Z]]
 ;
   %y = call <2 x i8> @llvm.bitreverse.v2i8(<2 x i8> %x)
@@ -806,4 +809,169 @@ define <2 x i1> @bitreverse_vec_eq_1_2_todo_no_splat(<2 x i8> %x) {
   %y = call <2 x i8> @llvm.bitreverse.v2i8(<2 x i8> %x)
   %z = icmp eq <2 x i8> %y, <i8 1, i8 2>
   ret <2 x i1> %z
+}
+
+define i1 @umax_eq_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @umax_eq_zero(
+; CHECK-NEXT:    [[TMP1:%.*]] = or i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = icmp eq i8 [[TMP1]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.umax.i8(i8 %x, i8 %y)
+  %r = icmp eq i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @umax_eq_1_fail(i8 %x, i8 %y) {
+; CHECK-LABEL: @umax_eq_1_fail(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.umax.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    [[R:%.*]] = icmp eq i8 [[M]], 1
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.umax.i8(i8 %x, i8 %y)
+  %r = icmp eq i8 %m, 1
+  ret i1 %r
+}
+
+define i1 @umax_sle_zero_fail(i8 %x, i8 %y) {
+; CHECK-LABEL: @umax_sle_zero_fail(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.umax.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i8 [[M]], 1
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.umax.i8(i8 %x, i8 %y)
+  %r = icmp sle i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @umax_ne_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @umax_ne_zero(
+; CHECK-NEXT:    [[TMP1:%.*]] = or i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = icmp ne i8 [[TMP1]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.umax.i8(i8 %x, i8 %y)
+  %r = icmp ne i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @umax_ne_zero_fail_multiuse(i8 %x, i8 %y) {
+; CHECK-LABEL: @umax_ne_zero_fail_multiuse(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.umax.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    call void @use8(i8 [[M]])
+; CHECK-NEXT:    [[R:%.*]] = icmp ne i8 [[M]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.umax.i8(i8 %x, i8 %y)
+  call void @use8(i8 %m)
+  %r = icmp ne i8 %m, 0
+  ret i1 %r
+}
+
+
+define i1 @uadd_sat_ne_zero_fail_multiuse(i8 %x, i8 %y) {
+; CHECK-LABEL: @uadd_sat_ne_zero_fail_multiuse(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.uadd.sat.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    call void @use8(i8 [[M]])
+; CHECK-NEXT:    [[R:%.*]] = icmp ne i8 [[M]], 0
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.uadd.sat.i8(i8 %x, i8 %y)
+  call void @use8(i8 %m)
+  %r = icmp ne i8 %m, 0
+  ret i1 %r
+}
+
+
+define i1 @ssub_sat_ne_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_ne_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp ne i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp ne i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_ne_fail_nonzero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_ne_fail_nonzero(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.ssub.sat.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    [[R:%.*]] = icmp ne i8 [[M]], 4
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp ne i8 %m, 4
+  ret i1 %r
+}
+
+define i1 @ssub_sat_eq_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_eq_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp eq i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp eq i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_sle_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_sle_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp sle i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp sle i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_sge_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_sge_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp sge i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp sge i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_slt_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_slt_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp slt i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_slt_neg1_fail(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_slt_neg1_fail(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.ssub.sat.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i8 [[M]], -1
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp slt i8 %m, -1
+  ret i1 %r
+}
+
+define i1 @ssub_sat_sgt_zero(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_sgt_zero(
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp sgt i8 %m, 0
+  ret i1 %r
+}
+
+define i1 @ssub_sat_sgt_one_fail(i8 %x, i8 %y) {
+; CHECK-LABEL: @ssub_sat_sgt_one_fail(
+; CHECK-NEXT:    [[M:%.*]] = call i8 @llvm.ssub.sat.i8(i8 [[X:%.*]], i8 [[Y:%.*]])
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i8 [[M]], 1
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %m = call i8 @llvm.ssub.sat.i8(i8 %x, i8 %y)
+  %r = icmp sgt i8 %m, 1
+  ret i1 %r
 }

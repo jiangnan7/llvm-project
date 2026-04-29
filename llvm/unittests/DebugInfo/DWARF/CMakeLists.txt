@@ -2,7 +2,9 @@ set(LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   AsmPrinter
   BinaryFormat
+  CodeGenTypes
   DebugInfoDWARF
+  DebugInfoDWARFLowLevel
   MC
   Object
   ObjectYAML
@@ -15,6 +17,7 @@ add_llvm_unittest(DebugInfoDWARFTests
   DwarfUtils.cpp
   DWARFAcceleratorTableTest.cpp
   DWARFDataExtractorTest.cpp
+  DWARFDebugAbbrevTest.cpp
   DWARFDebugArangeSetTest.cpp
   DWARFDebugFrameTest.cpp
   DWARFDebugInfoTest.cpp
@@ -29,5 +32,3 @@ add_llvm_unittest(DebugInfoDWARFTests
   )
 
 target_link_libraries(DebugInfoDWARFTests PRIVATE LLVMTestingSupport)
-
-set_property(TARGET DebugInfoDWARFTests PROPERTY FOLDER "Tests/UnitTests/DebugInfoTests")

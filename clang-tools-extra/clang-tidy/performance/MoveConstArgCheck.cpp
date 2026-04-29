@@ -44,7 +44,17 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
                unless(isInTemplateInstantiation()))
           .bind("call-move");
 
-  Finder->addMatcher(MoveCallMatcher, this);
+  // Match ternary expressions where either branch contains std::move
+  auto TernaryWithMoveMatcher =
+      conditionalOperator(hasDescendant(MoveCallMatcher));
+
+  Finder->addMatcher(
+      expr(anyOf(
+          castExpr(hasSourceExpression(MoveCallMatcher)),
+          cxxConstructExpr(hasDeclaration(cxxConstructorDecl(anyOf(
+                               isCopyConstructor(), isMoveConstructor()))),
+                           hasArgument(0, MoveCallMatcher)))),
+      this);
 
   auto ConstTypeParmMatcher =
       qualType(references(isConstQualified())).bind("invocation-parm-type");
@@ -52,13 +62,15 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
       qualType(rValueReferenceType()).bind("invocation-parm-type");
   // Matches respective ParmVarDecl for a CallExpr or CXXConstructExpr.
   auto ArgumentWithParamMatcher = forEachArgumentWithParam(
-      MoveCallMatcher, parmVarDecl(anyOf(hasType(ConstTypeParmMatcher),
-                                         hasType(RValueTypeParmMatcher)))
-                           .bind("invocation-parm"));
+      anyOf(MoveCallMatcher, TernaryWithMoveMatcher),
+      parmVarDecl(
+          anyOf(hasType(ConstTypeParmMatcher), hasType(RValueTypeParmMatcher)))
+          .bind("invocation-parm"));
   // Matches respective types of arguments for a CallExpr or CXXConstructExpr
   // and it works on calls through function pointers as well.
   auto ArgumentWithParamTypeMatcher = forEachArgumentWithParamType(
-      MoveCallMatcher, anyOf(ConstTypeParmMatcher, RValueTypeParmMatcher));
+      anyOf(MoveCallMatcher, TernaryWithMoveMatcher),
+      anyOf(ConstTypeParmMatcher, RValueTypeParmMatcher));
 
   Finder->addMatcher(
       invocation(anyOf(ArgumentWithParamMatcher, ArgumentWithParamTypeMatcher))
@@ -66,21 +78,19 @@ void MoveConstArgCheck::registerMatchers(MatchFinder *Finder) {
       this);
 }
 
-bool IsRValueReferenceParam(const Expr *Invocation,
-                            const QualType *InvocationParmType,
-                            const Expr *Arg) {
+static bool isRValueReferenceParam(const Expr *Invocation,
+                                   const QualType *InvocationParmType,
+                                   const Expr *Arg) {
   if (Invocation && (*InvocationParmType)->isRValueReferenceType() &&
       Arg->isLValue()) {
     if (!Invocation->getType()->isRecordType())
       return true;
-    else {
-      if (const auto *ConstructCallExpr =
-              dyn_cast<CXXConstructExpr>(Invocation)) {
-        if (const auto *ConstructorDecl = ConstructCallExpr->getConstructor()) {
-          if (!ConstructorDecl->isCopyOrMoveConstructor() &&
-              !ConstructorDecl->isDefaultConstructor())
-            return true;
-        }
+    if (const auto *ConstructCallExpr =
+            dyn_cast<CXXConstructExpr>(Invocation)) {
+      if (const auto *ConstructorDecl = ConstructCallExpr->getConstructor()) {
+        if (!ConstructorDecl->isCopyOrMoveConstructor() &&
+            !ConstructorDecl->isDefaultConstructor())
+          return true;
       }
     }
   }
@@ -103,6 +113,7 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
     AlreadyCheckedMoves.insert(CallMove);
 
   const Expr *Arg = CallMove->getArg(0);
+  const QualType ArgType = Arg->getType().getCanonicalType();
   SourceManager &SM = Result.Context->getSourceManager();
 
   CharSourceRange MoveRange =
@@ -112,12 +123,11 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
   if (!FileMoveRange.isValid())
     return;
 
-  bool IsConstArg = Arg->getType().isConstQualified();
-  bool IsTriviallyCopyable =
-      Arg->getType().isTriviallyCopyableType(*Result.Context);
+  bool IsConstArg = ArgType.isConstQualified();
+  bool IsTriviallyCopyable = ArgType.isTriviallyCopyableType(*Result.Context);
 
   if (IsConstArg || IsTriviallyCopyable) {
-    if (const CXXRecordDecl *R = Arg->getType()->getAsCXXRecordDecl()) {
+    if (const CXXRecordDecl *R = ArgType->getAsCXXRecordDecl()) {
       // According to [expr.prim.lambda]p3, "whether the closure type is
       // trivially copyable" property can be changed by the implementation of
       // the language, so we shouldn't rely on it when issuing diagnostics.
@@ -137,7 +147,7 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
     // std::move shouldn't be removed when an lvalue wrapped by std::move is
     // passed to the function with an rvalue reference parameter.
     bool IsRVRefParam =
-        IsRValueReferenceParam(ReceivingExpr, InvocationParmType, Arg);
+        isRValueReferenceParam(ReceivingExpr, InvocationParmType, Arg);
     const auto *Var =
         IsVariable ? dyn_cast<DeclRefExpr>(Arg)->getDecl() : nullptr;
 
@@ -196,11 +206,29 @@ void MoveConstArgCheck::check(const MatchFinder::MatchResult &Result) {
     if ((*InvocationParmType)->isRValueReferenceType())
       return;
 
-    auto Diag = diag(FileMoveRange.getBegin(),
-                     "passing result of std::move() as a const reference "
-                     "argument; no move will actually happen");
+    {
+      auto Diag = diag(FileMoveRange.getBegin(),
+                       "passing result of std::move() as a const reference "
+                       "argument; no move will actually happen");
 
-    replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
+      replaceCallWithArg(CallMove, Diag, SM, getLangOpts());
+    }
+
+    if (const CXXRecordDecl *RecordDecl = ArgType->getAsCXXRecordDecl();
+        RecordDecl && RecordDecl->hasDefinition() &&
+        !(RecordDecl->hasMoveConstructor() &&
+          RecordDecl->hasMoveAssignment())) {
+      const bool MissingMoveAssignment = !RecordDecl->hasMoveAssignment();
+      const bool MissingMoveConstructor = !RecordDecl->hasMoveConstructor();
+      const bool MissingBoth = MissingMoveAssignment && MissingMoveConstructor;
+
+      diag(RecordDecl->getLocation(),
+           "%0 is not move "
+           "%select{|assignable}1%select{|/}2%select{|constructible}3",
+           DiagnosticIDs::Note)
+          << RecordDecl << MissingMoveAssignment << MissingBoth
+          << MissingMoveConstructor;
+    }
   }
 }
 

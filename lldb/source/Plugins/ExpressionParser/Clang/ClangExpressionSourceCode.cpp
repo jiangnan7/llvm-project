@@ -212,7 +212,7 @@ public:
   /// Returns true iff the given expression body contained a token with the
   /// given content.
   bool hasToken(llvm::StringRef token) const {
-    return m_tokens.find(token) != m_tokens.end();
+    return m_tokens.contains(token);
   }
 };
 
@@ -229,9 +229,9 @@ void AddLambdaCaptureDecls(StreamString &stream, StackFrame *frame,
   assert(frame);
 
   if (auto thisValSP = ClangExpressionUtil::GetLambdaValueObject(frame)) {
-    uint32_t numChildren = thisValSP->GetNumChildren();
+    uint32_t numChildren = thisValSP->GetNumChildrenIgnoringErrors();
     for (uint32_t i = 0; i < numChildren; ++i) {
-      auto childVal = thisValSP->GetChildAtIndex(i, true);
+      auto childVal = thisValSP->GetChildAtIndex(i);
       ConstString childName(childVal ? childVal->GetName() : ConstString(""));
 
       if (!childName.IsEmpty() && verifier.hasToken(childName.GetStringRef()) &&
@@ -251,8 +251,8 @@ TokenVerifier::TokenVerifier(std::string body) {
   // We only care about tokens and not their original source locations. If we
   // move the whole expression to only be in one line we can simplify the
   // following code that extracts the token contents.
-  std::replace(body.begin(), body.end(), '\n', ' ');
-  std::replace(body.begin(), body.end(), '\r', ' ');
+  llvm::replace(body, '\n', ' ');
+  llvm::replace(body, '\r', ' ');
 
   FileSystemOptions file_opts;
   FileManager file_mgr(file_opts,
@@ -261,8 +261,7 @@ TokenVerifier::TokenVerifier(std::string body) {
   // Let's build the actual source code Clang needs and setup some utility
   // objects.
   llvm::IntrusiveRefCntPtr<DiagnosticIDs> diag_ids(new DiagnosticIDs());
-  llvm::IntrusiveRefCntPtr<DiagnosticOptions> diags_opts(
-      new DiagnosticOptions());
+  DiagnosticOptions diags_opts;
   DiagnosticsEngine diags(diag_ids, diags_opts);
   clang::SourceManager SM(diags, file_mgr);
   auto buf = llvm::MemoryBuffer::getMemBuffer(body);
@@ -274,7 +273,7 @@ TokenVerifier::TokenVerifier(std::string body) {
   LangOptions Opts;
   Opts.ObjC = true;
   Opts.DollarIdents = true;
-  Opts.CPlusPlus17 = true;
+  Opts.CPlusPlus20 = true;
   Opts.LineComment = true;
 
   Lexer lex(FID, buf->getMemBufferRef(), SM, Opts);
@@ -417,7 +416,7 @@ bool ClangExpressionSourceCode::GetText(
     if (sc.comp_unit && sc.line_entry.IsValid()) {
       DebugMacros *dm = sc.comp_unit->GetDebugMacros();
       if (dm) {
-        AddMacroState state(sc.line_entry.file, sc.line_entry.line);
+        AddMacroState state(sc.line_entry.GetFile(), sc.line_entry.line);
         AddMacros(dm, sc.comp_unit, state, debug_macros_stream);
       }
     }

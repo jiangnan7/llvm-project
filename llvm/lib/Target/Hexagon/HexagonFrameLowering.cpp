@@ -196,29 +196,18 @@ static cl::opt<unsigned> SpillOptMax("spill-opt-max", cl::Hidden,
 static unsigned SpillOptCount = 0;
 #endif
 
-namespace llvm {
-
-  void initializeHexagonCallFrameInformationPass(PassRegistry&);
-  FunctionPass *createHexagonCallFrameInformation();
-
-} // end namespace llvm
-
 namespace {
 
   class HexagonCallFrameInformation : public MachineFunctionPass {
   public:
     static char ID;
 
-    HexagonCallFrameInformation() : MachineFunctionPass(ID) {
-      PassRegistry &PR = *PassRegistry::getPassRegistry();
-      initializeHexagonCallFrameInformationPass(PR);
-    }
+    HexagonCallFrameInformation() : MachineFunctionPass(ID) {}
 
     bool runOnMachineFunction(MachineFunction &MF) override;
 
     MachineFunctionProperties getRequiredProperties() const override {
-      return MachineFunctionProperties().set(
-          MachineFunctionProperties::Property::NoVRegs);
+      return MachineFunctionProperties().setNoVRegs();
     }
   };
 
@@ -252,13 +241,13 @@ static Register getMax32BitSubRegister(Register Reg,
       return Reg;
 
     Register RegNo = 0;
-    for (MCSubRegIterator SubRegs(Reg, &TRI); SubRegs.isValid(); ++SubRegs) {
+    for (MCPhysReg SubReg : TRI.subregs(Reg)) {
       if (hireg) {
-        if (*SubRegs > RegNo)
-          RegNo = *SubRegs;
+        if (SubReg > RegNo)
+          RegNo = SubReg;
       } else {
-        if (!RegNo || *SubRegs < RegNo)
-          RegNo = *SubRegs;
+        if (!RegNo || SubReg < RegNo)
+          RegNo = SubReg;
       }
     }
     return RegNo;
@@ -307,12 +296,15 @@ static bool needsStackFrame(const MachineBasicBlock &MBB, const BitVector &CSR,
           return true;
         if (MO.isReg()) {
           Register R = MO.getReg();
+          // Debug instructions may refer to $noreg.
+          if (!R)
+            continue;
           // Virtual registers will need scavenging, which then may require
           // a stack slot.
           if (R.isVirtual())
             return true;
-          for (MCSubRegIterator S(R, &HRI, true); S.isValid(); ++S)
-            if (CSR[*S])
+          for (MCPhysReg S : HRI.subregs_inclusive(R))
+            if (CSR[S])
               return true;
           continue;
         }
@@ -378,7 +370,7 @@ static bool isRestoreCall(unsigned Opc) {
 
 static inline bool isOptNone(const MachineFunction &MF) {
     return MF.getFunction().hasOptNone() ||
-           MF.getTarget().getOptLevel() == CodeGenOpt::None;
+           MF.getTarget().getOptLevel() == CodeGenOptLevel::None;
 }
 
 static inline bool isOptSize(const MachineFunction &MF) {
@@ -410,9 +402,9 @@ void HexagonFrameLowering::findShrunkPrologEpilog(MachineFunction &MF,
   auto &HRI = *MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
 
   MachineDominatorTree MDT;
-  MDT.runOnMachineFunction(MF);
+  MDT.recalculate(MF);
   MachinePostDominatorTree MPT;
-  MPT.runOnMachineFunction(MF);
+  MPT.recalculate(MF);
 
   using UnsignedMap = DenseMap<unsigned, unsigned>;
   using RPOTType = ReversePostOrderTraversal<const MachineFunction *>;
@@ -439,8 +431,8 @@ void HexagonFrameLowering::findShrunkPrologEpilog(MachineFunction &MF,
   SmallVector<MachineBasicBlock*,16> SFBlocks;
   BitVector CSR(Hexagon::NUM_TARGET_REGS);
   for (const MCPhysReg *P = HRI.getCalleeSavedRegs(&MF); *P; ++P)
-    for (MCSubRegIterator S(*P, &HRI, true); S.isValid(); ++S)
-      CSR[*S] = true;
+    for (MCPhysReg S : HRI.subregs_inclusive(*P))
+      CSR[S] = true;
 
   for (auto &I : MF)
     if (needsStackFrame(I, CSR, HRI))
@@ -903,22 +895,25 @@ void HexagonFrameLowering::insertAllocframe(MachineBasicBlock &MBB,
   if (NumBytes >= ALLOCFRAME_MAX) {
     // Emit allocframe(#0).
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::S2_allocframe))
-      .addDef(SP)
-      .addReg(SP)
-      .addImm(0)
-      .addMemOperand(MMO);
+        .addDef(SP)
+        .addReg(SP)
+        .addImm(0)
+        .addMemOperand(MMO)
+        .setMIFlag(MachineInstr::FrameSetup);
 
     // Subtract the size from the stack pointer.
     Register SP = HRI.getStackRegister();
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::A2_addi), SP)
-      .addReg(SP)
-      .addImm(-int(NumBytes));
+        .addReg(SP)
+        .addImm(-int(NumBytes))
+        .setMIFlag(MachineInstr::FrameSetup);
   } else {
     BuildMI(MBB, InsertPt, dl, HII.get(Hexagon::S2_allocframe))
-      .addDef(SP)
-      .addReg(SP)
-      .addImm(NumBytes)
-      .addMemOperand(MMO);
+        .addDef(SP)
+        .addReg(SP)
+        .addImm(NumBytes)
+        .addMemOperand(MMO)
+        .setMIFlag(MachineInstr::FrameSetup);
   }
 }
 
@@ -1029,7 +1024,6 @@ void HexagonFrameLowering::insertCFIInstructionsAt(MachineBasicBlock &MBB,
       MachineBasicBlock::iterator At) const {
   MachineFunction &MF = *MBB.getParent();
   MachineFrameInfo &MFI = MF.getFrameInfo();
-  MachineModuleInfo &MMI = MF.getMMI();
   auto &HST = MF.getSubtarget<HexagonSubtarget>();
   auto &HII = *HST.getInstrInfo();
   auto &HRI = *HST.getRegisterInfo();
@@ -1040,7 +1034,7 @@ void HexagonFrameLowering::insertCFIInstructionsAt(MachineBasicBlock &MBB,
   DebugLoc DL;
   const MCInstrDesc &CFID = HII.get(TargetOpcode::CFI_INSTRUCTION);
 
-  MCSymbol *FrameLabel = MMI.getContext().createTempSymbol();
+  MCSymbol *FrameLabel = MF.getContext().createTempSymbol();
   bool HasFP = hasFP(MF);
 
   if (HasFP) {
@@ -1071,20 +1065,18 @@ void HexagonFrameLowering::insertCFIInstructionsAt(MachineBasicBlock &MBB,
         .addCFIIndex(MF.addFrameInst(OffR30));
   }
 
-  static Register RegsToMove[] = {
+  static const MCPhysReg RegsToMove[] = {
     Hexagon::R1,  Hexagon::R0,  Hexagon::R3,  Hexagon::R2,
     Hexagon::R17, Hexagon::R16, Hexagon::R19, Hexagon::R18,
     Hexagon::R21, Hexagon::R20, Hexagon::R23, Hexagon::R22,
     Hexagon::R25, Hexagon::R24, Hexagon::R27, Hexagon::R26,
     Hexagon::D0,  Hexagon::D1,  Hexagon::D8,  Hexagon::D9,
-    Hexagon::D10, Hexagon::D11, Hexagon::D12, Hexagon::D13,
-    Hexagon::NoRegister
+    Hexagon::D10, Hexagon::D11, Hexagon::D12, Hexagon::D13
   };
 
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
 
-  for (unsigned i = 0; RegsToMove[i] != Hexagon::NoRegister; ++i) {
-    Register Reg = RegsToMove[i];
+  for (MCPhysReg Reg : RegsToMove) {
     auto IfR = [Reg] (const CalleeSavedInfo &C) -> bool {
       return C.getReg() == Reg;
     };
@@ -1139,10 +1131,7 @@ void HexagonFrameLowering::insertCFIInstructionsAt(MachineBasicBlock &MBB,
   }
 }
 
-bool HexagonFrameLowering::hasFP(const MachineFunction &MF) const {
-  if (MF.getFunction().hasFnAttribute(Attribute::Naked))
-    return false;
-
+bool HexagonFrameLowering::hasFPImpl(const MachineFunction &MF) const {
   auto &MFI = MF.getFrameInfo();
   auto &HRI = *MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
   bool HasExtraAlign = HRI.hasStackRealignment(MF);
@@ -1153,7 +1142,7 @@ bool HexagonFrameLowering::hasFP(const MachineFunction &MF) const {
   // gdb can't break at the start of the function without it.  Will remove if
   // this turns out to be a gdb bug.
   //
-  if (MF.getTarget().getOptLevel() == CodeGenOpt::None)
+  if (MF.getTarget().getOptLevel() == CodeGenOptLevel::None)
     return true;
 
   // By default we want to use SP (since it's always there). FP requires
@@ -1266,7 +1255,7 @@ HexagonFrameLowering::getFrameIndexReference(const MachineFunction &MF, int FI,
   int Offset = MFI.getObjectOffset(FI);
   bool HasAlloca = MFI.hasVarSizedObjects();
   bool HasExtraAlign = HRI.hasStackRealignment(MF);
-  bool NoOpt = MF.getTarget().getOptLevel() == CodeGenOpt::None;
+  bool NoOpt = MF.getTarget().getOptLevel() == CodeGenOptLevel::None;
 
   auto &HMFI = *MF.getInfo<HexagonMachineFunctionInfo>();
   unsigned FrameSize = MFI.getStackSize();
@@ -1409,7 +1398,7 @@ bool HexagonFrameLowering::insertCSRSpillsInBlock(MachineBasicBlock &MBB,
   }
 
   for (const CalleeSavedInfo &I : CSI) {
-    Register Reg = I.getReg();
+    MCRegister Reg = I.getReg();
     // Add live in registers. We treat eh_return callee saved register r0 - r3
     // specially. They are not really callee saved registers as they are not
     // supposed to be killed.
@@ -1478,7 +1467,7 @@ bool HexagonFrameLowering::insertCSRRestoresInBlock(MachineBasicBlock &MBB,
   }
 
   for (const CalleeSavedInfo &I : CSI) {
-    Register Reg = I.getReg();
+    MCRegister Reg = I.getReg();
     const TargetRegisterClass *RC = HRI.getMinimalPhysRegClass(Reg);
     int FI = I.getFrameIdx();
     HII.loadRegFromStackSlot(MBB, MI, Reg, FI, RC, &HRI, Register());
@@ -1512,7 +1501,7 @@ void HexagonFrameLowering::processFunctionBeforeFrameFinalized(
     return;
 
   // Set the physical aligned-stack base address register.
-  Register AP = 0;
+  MCRegister AP;
   if (const MachineInstr *AI = getAlignaInstr(MF))
     AP = AI->getOperand(0).getReg();
   auto &HMFI = *MF.getInfo<HexagonMachineFunctionInfo>();
@@ -1569,8 +1558,8 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   for (const CalleeSavedInfo &I : CSI) {
     Register R = I.getReg();
     LLVM_DEBUG(dbgs() << ' ' << printReg(R, TRI));
-    for (MCSubRegIterator SR(R, TRI, true); SR.isValid(); ++SR)
-      SRegs[*SR] = true;
+    for (MCPhysReg SR : TRI->subregs_inclusive(R))
+      SRegs[SR] = true;
   }
   LLVM_DEBUG(dbgs() << " }\n");
   LLVM_DEBUG(dbgs() << "SRegs.1: "; dump_registers(SRegs, *TRI);
@@ -1586,23 +1575,23 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   if (AP.isValid()) {
     Reserved[AP] = false;
     // Unreserve super-regs if no other subregisters are reserved.
-    for (MCSuperRegIterator SP(AP, TRI, false); SP.isValid(); ++SP) {
+    for (MCPhysReg SP : TRI->superregs(AP)) {
       bool HasResSub = false;
-      for (MCSubRegIterator SB(*SP, TRI, false); SB.isValid(); ++SB) {
-        if (!Reserved[*SB])
+      for (MCPhysReg SB : TRI->subregs(SP)) {
+        if (!Reserved[SB])
           continue;
         HasResSub = true;
         break;
       }
       if (!HasResSub)
-        Reserved[*SP] = false;
+        Reserved[SP] = false;
     }
   }
 
   for (int x = Reserved.find_first(); x >= 0; x = Reserved.find_next(x)) {
     Register R = x;
-    for (MCSuperRegIterator SR(R, TRI, true); SR.isValid(); ++SR)
-      SRegs[*SR] = false;
+    for (MCPhysReg SR : TRI->superregs_inclusive(R))
+      SRegs[SR] = false;
   }
   LLVM_DEBUG(dbgs() << "Res:     "; dump_registers(Reserved, *TRI);
              dbgs() << "\n");
@@ -1616,13 +1605,13 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   BitVector TmpSup(Hexagon::NUM_TARGET_REGS);
   for (int x = SRegs.find_first(); x >= 0; x = SRegs.find_next(x)) {
     Register R = x;
-    for (MCSuperRegIterator SR(R, TRI); SR.isValid(); ++SR)
-      TmpSup[*SR] = true;
+    for (MCPhysReg SR : TRI->superregs(R))
+      TmpSup[SR] = true;
   }
   for (int x = TmpSup.find_first(); x >= 0; x = TmpSup.find_next(x)) {
     Register R = x;
-    for (MCSubRegIterator SR(R, TRI, true); SR.isValid(); ++SR) {
-      if (!Reserved[*SR])
+    for (MCPhysReg SR : TRI->subregs_inclusive(R)) {
+      if (!Reserved[SR])
         continue;
       TmpSup[R] = false;
       break;
@@ -1640,8 +1629,8 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   // remove R from SRegs.
   for (int x = SRegs.find_first(); x >= 0; x = SRegs.find_next(x)) {
     Register R = x;
-    for (MCSuperRegIterator SR(R, TRI); SR.isValid(); ++SR) {
-      if (!SRegs[*SR])
+    for (MCPhysReg SR : TRI->superregs(R)) {
+      if (!SRegs[SR])
         continue;
       SRegs[R] = false;
       break;
@@ -1657,7 +1646,7 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
   using SpillSlot = TargetFrameLowering::SpillSlot;
 
   unsigned NumFixed;
-  int MinOffset = 0;  // CS offsets are negative.
+  int64_t MinOffset = 0; // CS offsets are negative.
   const SpillSlot *FixedSlots = getCalleeSavedSpillSlots(NumFixed);
   for (const SpillSlot *S = FixedSlots; S != FixedSlots+NumFixed; ++S) {
     if (!SRegs[S->Reg])
@@ -1676,7 +1665,7 @@ bool HexagonFrameLowering::assignCalleeSavedSpillSlots(MachineFunction &MF,
     Register R = x;
     const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(R);
     unsigned Size = TRI->getSpillSize(*RC);
-    int Off = MinOffset - Size;
+    int64_t Off = MinOffset - Size;
     Align Alignment = std::min(TRI->getSpillAlign(*RC), getStackAlign());
     Off &= -Alignment.value();
     int FI = MFI.CreateFixedSpillStackObject(Size, Off);
@@ -2207,10 +2196,7 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
   // and collect relevant information.
   for (auto &B : MF) {
     std::map<int,IndexType> LastStore, LastLoad;
-    // Emplace appears not to be supported in gcc 4.7.2-4.
-    //auto P = BlockIndexes.emplace(&B, HexagonBlockRanges::InstrIndexMap(B));
-    auto P = BlockIndexes.insert(
-                std::make_pair(&B, HexagonBlockRanges::InstrIndexMap(B)));
+    auto P = BlockIndexes.emplace(&B, HexagonBlockRanges::InstrIndexMap(B));
     auto &IndexMap = P.first->second;
     LLVM_DEBUG(dbgs() << "Index map for " << printMBBReference(B) << "\n"
                       << IndexMap << '\n');
@@ -2281,18 +2267,20 @@ void HexagonFrameLowering::optimizeSpillSlots(MachineFunction &MF,
           continue;
 
         IndexType Index = IndexMap.getIndex(&In);
+        auto &LS = LastStore[FI];
+        auto &LL = LastLoad[FI];
         if (Load) {
-          if (LastStore[FI] == IndexType::None)
-            LastStore[FI] = IndexType::Entry;
-          LastLoad[FI] = Index;
+          if (LS == IndexType::None)
+            LS = IndexType::Entry;
+          LL = Index;
         } else if (Store) {
           HexagonBlockRanges::RangeList &RL = FIRangeMap[FI].Map[&B];
-          if (LastStore[FI] != IndexType::None)
-            RL.add(LastStore[FI], LastLoad[FI], false, false);
-          else if (LastLoad[FI] != IndexType::None)
-            RL.add(IndexType::Entry, LastLoad[FI], false, false);
-          LastLoad[FI] = IndexType::None;
-          LastStore[FI] = Index;
+          if (LS != IndexType::None)
+            RL.add(LS, LL, false, false);
+          else if (LL != IndexType::None)
+            RL.add(IndexType::Entry, LL, false, false);
+          LL = IndexType::None;
+          LS = Index;
         } else {
           BadFIs.insert(FI);
         }
@@ -2581,14 +2569,14 @@ bool HexagonFrameLowering::shouldInlineCSR(const MachineFunction &MF,
   if (!hasFP(MF))
     return true;
   if (!isOptSize(MF) && !isMinSize(MF))
-    if (MF.getTarget().getOptLevel() > CodeGenOpt::Default)
+    if (MF.getTarget().getOptLevel() > CodeGenOptLevel::Default)
       return true;
 
   // Check if CSI only has double registers, and if the registers form
   // a contiguous block starting from D8.
   BitVector Regs(Hexagon::NUM_TARGET_REGS);
   for (const CalleeSavedInfo &I : CSI) {
-    Register R = I.getReg();
+    MCRegister R = I.getReg();
     if (!Hexagon::DoubleRegsRegClass.contains(R))
       return true;
     Regs[R] = true;
@@ -2684,4 +2672,68 @@ bool HexagonFrameLowering::mayOverflowFrameOffset(MachineFunction &MF) const {
     return !isUInt<6>(StackSize >> MinLS);
 
   return false;
+}
+
+namespace {
+// Struct used by orderFrameObjects to help sort the stack objects.
+struct HexagonFrameSortingObject {
+  bool IsValid = false;
+  unsigned Index = 0; // Index of Object into MFI list.
+  unsigned Size = 0;
+  Align ObjectAlignment = Align(1); // Alignment of Object in bytes.
+};
+
+struct HexagonFrameSortingComparator {
+  inline bool operator()(const HexagonFrameSortingObject &A,
+                         const HexagonFrameSortingObject &B) const {
+    return std::make_tuple(!A.IsValid, A.ObjectAlignment, A.Size) <
+           std::make_tuple(!B.IsValid, B.ObjectAlignment, B.Size);
+  }
+};
+} // namespace
+
+// Sort objects on the stack by alignment value and then by size to minimize
+// padding.
+void HexagonFrameLowering::orderFrameObjects(
+    const MachineFunction &MF, SmallVectorImpl<int> &ObjectsToAllocate) const {
+
+  if (ObjectsToAllocate.empty())
+    return;
+
+  const MachineFrameInfo &MFI = MF.getFrameInfo();
+  int NObjects = ObjectsToAllocate.size();
+
+  // Create an array of all MFI objects.
+  SmallVector<HexagonFrameSortingObject> SortingObjects(
+      MFI.getObjectIndexEnd());
+
+  for (int i = 0, j = 0, e = MFI.getObjectIndexEnd(); i < e && j != NObjects;
+       ++i) {
+    if (i != ObjectsToAllocate[j])
+      continue;
+    j++;
+
+    // A variable size object has size equal to 0. Since Hexagon sets
+    // getUseLocalStackAllocationBlock() to true, a local block is allocated
+    // earlier. This case is not handled here for now.
+    int Size = MFI.getObjectSize(i);
+    if (Size == 0)
+      return;
+
+    SortingObjects[i].IsValid = true;
+    SortingObjects[i].Index = i;
+    SortingObjects[i].Size = Size;
+    SortingObjects[i].ObjectAlignment = MFI.getObjectAlign(i);
+  }
+
+  // Sort objects by alignment and then by size.
+  llvm::stable_sort(SortingObjects, HexagonFrameSortingComparator());
+
+  // Modify the original list to represent the final order.
+  int i = NObjects;
+  for (auto &Obj : SortingObjects) {
+    if (i == 0)
+      break;
+    ObjectsToAllocate[--i] = Obj.Index;
+  }
 }

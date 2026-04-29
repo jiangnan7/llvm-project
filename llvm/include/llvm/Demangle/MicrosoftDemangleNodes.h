@@ -13,10 +13,10 @@
 #ifndef LLVM_DEMANGLE_MICROSOFTDEMANGLENODES_H
 #define LLVM_DEMANGLE_MICROSOFTDEMANGLENODES_H
 
-#include "llvm/Demangle/StringView.h"
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace llvm {
 namespace itanium_demangle {
@@ -25,7 +25,6 @@ class OutputBuffer;
 }
 
 using llvm::itanium_demangle::OutputBuffer;
-using llvm::itanium_demangle::StringView;
 
 namespace llvm {
 namespace ms_demangle {
@@ -105,6 +104,8 @@ enum class PrimitiveKind {
   Double,
   Ldouble,
   Nullptr,
+  Auto,
+  DecltypeAuto,
 };
 
 enum class CharKind {
@@ -225,34 +226,51 @@ enum class TagKind { Class, Struct, Union, Enum };
 
 enum class NodeKind {
   Unknown,
-  Md5Symbol,
-  PrimitiveType,
-  FunctionSignature,
-  Identifier,
-  NamedIdentifier,
-  VcallThunkIdentifier,
-  LocalStaticGuardIdentifier,
-  IntrinsicFunctionIdentifier,
-  ConversionOperatorIdentifier,
-  DynamicStructorIdentifier,
-  StructorIdentifier,
-  LiteralOperatorIdentifier,
-  ThunkSignature,
-  PointerType,
-  TagType,
-  ArrayType,
-  Custom,
-  IntrinsicType,
-  NodeArray,
-  QualifiedName,
-  TemplateParameterReference,
+
+  SymbolStart,
+  Md5Symbol = SymbolStart,
   EncodedStringLiteral,
-  IntegerLiteral,
-  RttiBaseClassDescriptor,
-  LocalStaticGuardVariable,
   FunctionSymbol,
+  LocalStaticGuardVariable,
+  SpecialTableSymbol,
   VariableSymbol,
-  SpecialTableSymbol
+  SymbolEnd = VariableSymbol,
+
+  IdentifierStart,
+  ConversionOperatorIdentifier = IdentifierStart,
+  DynamicStructorIdentifier,
+  IntrinsicFunctionIdentifier,
+  LiteralOperatorIdentifier,
+  LocalStaticGuardIdentifier,
+  NamedIdentifier,
+  RttiBaseClassDescriptor,
+  StructorIdentifier,
+  VcallThunkIdentifier,
+  IdentifierEnd = VcallThunkIdentifier,
+
+  TypeStart,
+  ArrayType = TypeStart,
+  Custom,
+
+  FunctionSignature,
+  ThunkSignature,
+  FunctionSignatureEnd = ThunkSignature,
+
+  IntrinsicType,
+  PointerType,
+  PrimitiveType,
+  TagType,
+  TypeEnd = TagType,
+
+  PointerAuthQualifier,
+
+  IntegerLiteral,
+
+  NodeArray,
+
+  QualifiedName,
+
+  TemplateParameterReference,
 };
 
 struct Node {
@@ -294,6 +312,7 @@ struct SymbolNode;
 struct FunctionSymbolNode;
 struct VariableSymbolNode;
 struct SpecialTableSymbolNode;
+struct PointerAuthQualifierNode;
 
 struct TypeNode : public Node {
   explicit TypeNode(NodeKind K) : Node(K) {}
@@ -306,6 +325,10 @@ struct TypeNode : public Node {
     outputPost(OB, Flags);
   }
 
+  static bool classof(const Node *N) {
+    return N->kind() >= NodeKind::TypeStart && N->kind() <= NodeKind::TypeEnd;
+  }
+
   Qualifiers Quals = Q_None;
 };
 
@@ -315,6 +338,10 @@ struct PrimitiveTypeNode : public TypeNode {
 
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override {}
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::PrimitiveType;
+  }
 
   PrimitiveKind PrimKind;
 };
@@ -326,6 +353,11 @@ struct FunctionSignatureNode : public TypeNode {
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() >= NodeKind::FunctionSignature &&
+           N->kind() <= NodeKind::FunctionSignatureEnd;
+  }
+
   // Valid if this FunctionTypeNode is the Pointee of a PointerType or
   // MemberPointerType.
   PointerAffinity Affinity = PointerAffinity::None;
@@ -333,7 +365,7 @@ struct FunctionSignatureNode : public TypeNode {
   // The function's calling convention.
   CallingConv CallConvention = CallingConv::None;
 
-  // Function flags (gloabl, public, etc)
+  // Function flags (global, public, etc)
   FuncClass FunctionClass = FC_Global;
 
   FunctionRefQualifier RefQualifier = FunctionRefQualifier::None;
@@ -354,6 +386,11 @@ struct FunctionSignatureNode : public TypeNode {
 struct IdentifierNode : public Node {
   explicit IdentifierNode(NodeKind K) : Node(K) {}
 
+  static bool classof(const Node *N) {
+    return N->kind() >= NodeKind::IdentifierStart &&
+           N->kind() <= NodeKind::IdentifierEnd;
+  }
+
   NodeArrayNode *TemplateParams = nullptr;
 
 protected:
@@ -365,6 +402,10 @@ struct VcallThunkIdentifierNode : public IdentifierNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::VcallThunkIdentifier;
+  }
+
   uint64_t OffsetInVTable = 0;
 };
 
@@ -373,6 +414,10 @@ struct DynamicStructorIdentifierNode : public IdentifierNode {
       : IdentifierNode(NodeKind::DynamicStructorIdentifier) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::DynamicStructorIdentifier;
+  }
 
   VariableSymbolNode *Variable = nullptr;
   QualifiedNameNode *Name = nullptr;
@@ -384,7 +429,11 @@ struct NamedIdentifierNode : public IdentifierNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
-  StringView Name;
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::NamedIdentifier;
+  }
+
+  std::string_view Name;
 };
 
 struct IntrinsicFunctionIdentifierNode : public IdentifierNode {
@@ -393,6 +442,10 @@ struct IntrinsicFunctionIdentifierNode : public IdentifierNode {
         Operator(Operator) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::IntrinsicFunctionIdentifier;
+  }
 
   IntrinsicFunctionKind Operator;
 };
@@ -403,7 +456,11 @@ struct LiteralOperatorIdentifierNode : public IdentifierNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
-  StringView Name;
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::LiteralOperatorIdentifier;
+  }
+
+  std::string_view Name;
 };
 
 struct LocalStaticGuardIdentifierNode : public IdentifierNode {
@@ -411,6 +468,10 @@ struct LocalStaticGuardIdentifierNode : public IdentifierNode {
       : IdentifierNode(NodeKind::LocalStaticGuardIdentifier) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::LocalStaticGuardIdentifier;
+  }
 
   bool IsThread = false;
   uint32_t ScopeIndex = 0;
@@ -421,6 +482,10 @@ struct ConversionOperatorIdentifierNode : public IdentifierNode {
       : IdentifierNode(NodeKind::ConversionOperatorIdentifier) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::ConversionOperatorIdentifier;
+  }
 
   // The type that this operator converts too.
   TypeNode *TargetType = nullptr;
@@ -434,6 +499,10 @@ struct StructorIdentifierNode : public IdentifierNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::StructorIdentifier;
+  }
+
   // The name of the class that this is a structor of.
   IdentifierNode *Class = nullptr;
   bool IsDestructor = false;
@@ -444,6 +513,10 @@ struct ThunkSignatureNode : public FunctionSignatureNode {
 
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::ThunkSignature;
+  }
 
   struct ThisAdjustor {
     uint32_t StaticOffset = 0;
@@ -460,11 +533,17 @@ struct PointerTypeNode : public TypeNode {
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::PointerType;
+  }
+
   // Is this a pointer, reference, or rvalue-reference?
   PointerAffinity Affinity = PointerAffinity::None;
 
   // If this is a member pointer, this is the class that the member is in.
   QualifiedNameNode *ClassParent = nullptr;
+
+  PointerAuthQualifierNode *PointerAuthQualifier = nullptr;
 
   // Represents a type X in "a pointer to X", "a reference to X", or
   // "rvalue-reference to X"
@@ -476,6 +555,8 @@ struct TagTypeNode : public TypeNode {
 
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) { return N->kind() == NodeKind::TagType; }
 
   QualifiedNameNode *QualifiedName = nullptr;
   TagKind Tag;
@@ -490,6 +571,10 @@ struct ArrayTypeNode : public TypeNode {
   void outputDimensionsImpl(OutputBuffer &OB, OutputFlags Flags) const;
   void outputOneDimension(OutputBuffer &OB, OutputFlags Flags, Node *N) const;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::ArrayType;
+  }
+
   // A list of array dimensions.  e.g. [3,4,5] in `int Foo[3][4][5]`
   NodeArrayNode *Dimensions = nullptr;
 
@@ -500,6 +585,10 @@ struct ArrayTypeNode : public TypeNode {
 struct IntrinsicNode : public TypeNode {
   IntrinsicNode() : TypeNode(NodeKind::IntrinsicType) {}
   void output(OutputBuffer &OB, OutputFlags Flags) const override {}
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::IntrinsicType;
+  }
 };
 
 struct CustomTypeNode : public TypeNode {
@@ -507,6 +596,8 @@ struct CustomTypeNode : public TypeNode {
 
   void outputPre(OutputBuffer &OB, OutputFlags Flags) const override;
   void outputPost(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) { return N->kind() == NodeKind::Custom; }
 
   IdentifierNode *Identifier = nullptr;
 };
@@ -516,7 +607,12 @@ struct NodeArrayNode : public Node {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
-  void output(OutputBuffer &OB, OutputFlags Flags, StringView Separator) const;
+  void output(OutputBuffer &OB, OutputFlags Flags,
+              std::string_view Separator) const;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::NodeArray;
+  }
 
   Node **Nodes = nullptr;
   size_t Count = 0;
@@ -526,6 +622,10 @@ struct QualifiedNameNode : public Node {
   QualifiedNameNode() : Node(NodeKind::QualifiedName) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::QualifiedName;
+  }
 
   NodeArrayNode *Components = nullptr;
 
@@ -540,6 +640,10 @@ struct TemplateParameterReferenceNode : public Node {
       : Node(NodeKind::TemplateParameterReference) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::TemplateParameterReference;
+  }
 
   SymbolNode *Symbol = nullptr;
 
@@ -556,6 +660,10 @@ struct IntegerLiteralNode : public Node {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::IntegerLiteral;
+  }
+
   uint64_t Value = 0;
   bool IsNegative = false;
 };
@@ -566,6 +674,10 @@ struct RttiBaseClassDescriptorNode : public IdentifierNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::RttiBaseClassDescriptor;
+  }
+
   uint32_t NVOffset = 0;
   int32_t VBPtrOffset = 0;
   uint32_t VBTableOffset = 0;
@@ -575,6 +687,12 @@ struct RttiBaseClassDescriptorNode : public IdentifierNode {
 struct SymbolNode : public Node {
   explicit SymbolNode(NodeKind K) : Node(K) {}
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() >= NodeKind::SymbolStart &&
+           N->kind() <= NodeKind::SymbolEnd;
+  }
+
   QualifiedNameNode *Name = nullptr;
 };
 
@@ -583,6 +701,11 @@ struct SpecialTableSymbolNode : public SymbolNode {
       : SymbolNode(NodeKind::SpecialTableSymbol) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::SpecialTableSymbol;
+  }
+
   QualifiedNameNode *TargetName = nullptr;
   Qualifiers Quals = Qualifiers::Q_None;
 };
@@ -593,6 +716,10 @@ struct LocalStaticGuardVariableNode : public SymbolNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::LocalStaticGuardVariable;
+  }
+
   bool IsVisible = false;
 };
 
@@ -601,7 +728,11 @@ struct EncodedStringLiteralNode : public SymbolNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
-  StringView DecodedString;
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::EncodedStringLiteral;
+  }
+
+  std::string_view DecodedString;
   bool IsTruncated = false;
   CharKind Char = CharKind::Char;
 };
@@ -610,6 +741,10 @@ struct VariableSymbolNode : public SymbolNode {
   VariableSymbolNode() : SymbolNode(NodeKind::VariableSymbol) {}
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::VariableSymbol;
+  }
 
   StorageClass SC = StorageClass::None;
   TypeNode *Type = nullptr;
@@ -620,7 +755,31 @@ struct FunctionSymbolNode : public SymbolNode {
 
   void output(OutputBuffer &OB, OutputFlags Flags) const override;
 
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::FunctionSymbol;
+  }
+
   FunctionSignatureNode *Signature = nullptr;
+};
+
+struct PointerAuthQualifierNode : public Node {
+  PointerAuthQualifierNode() : Node(NodeKind::PointerAuthQualifier) {}
+
+  // __ptrauth takes three arguments:
+  //  - key
+  //  - isAddressDiscriminated
+  //  - extra discriminator
+  static constexpr unsigned NumArgs = 3;
+  typedef std::array<uint64_t, NumArgs> ArgArray;
+
+  void output(OutputBuffer &OB, OutputFlags Flags) const override;
+
+  static bool classof(const Node *N) {
+    return N->kind() == NodeKind::PointerAuthQualifier;
+  }
+
+  // List of arguments.
+  NodeArrayNode *Components = nullptr;
 };
 
 } // namespace ms_demangle

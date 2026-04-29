@@ -137,6 +137,8 @@ template <> struct ScalarEnumerationTraits<MachineJumpTableInfo::JTEntryKind> {
                 MachineJumpTableInfo::EK_GPRel32BlockAddress);
     IO.enumCase(EntryKind, "label-difference32",
                 MachineJumpTableInfo::EK_LabelDifference32);
+    IO.enumCase(EntryKind, "label-difference64",
+                MachineJumpTableInfo::EK_LabelDifference64);
     IO.enumCase(EntryKind, "inline", MachineJumpTableInfo::EK_Inline);
     IO.enumCase(EntryKind, "custom32", MachineJumpTableInfo::EK_Custom32);
   }
@@ -189,6 +191,7 @@ struct VirtualRegisterDefinition {
   UnsignedValue ID;
   StringValue Class;
   StringValue PreferredRegister;
+  std::vector<FlowStringValue> RegisterFlags;
 
   // TODO: Serialize the target specific register hints.
 
@@ -204,6 +207,8 @@ template <> struct MappingTraits<VirtualRegisterDefinition> {
     YamlIO.mapRequired("class", Reg.Class);
     YamlIO.mapOptional("preferred-register", Reg.PreferredRegister,
                        StringValue()); // Don't print out when it's empty.
+    YamlIO.mapOptional("flags", Reg.RegisterFlags,
+                       std::vector<FlowStringValue>());
   }
 
   static const bool flow = true;
@@ -301,6 +306,30 @@ template <> struct MappingTraits<MachineStackObject> {
                        StringValue()); // Don't print it out when it's empty.
   }
 
+  static const bool flow = true;
+};
+
+/// Serializable representation of the MCRegister variant of
+/// MachineFunction::VariableDbgInfo.
+struct EntryValueObject {
+  StringValue EntryValueRegister;
+  StringValue DebugVar;
+  StringValue DebugExpr;
+  StringValue DebugLoc;
+  bool operator==(const EntryValueObject &Other) const {
+    return EntryValueRegister == Other.EntryValueRegister &&
+           DebugVar == Other.DebugVar && DebugExpr == Other.DebugExpr &&
+           DebugLoc == Other.DebugLoc;
+  }
+};
+
+template <> struct MappingTraits<EntryValueObject> {
+  static void mapping(yaml::IO &YamlIO, EntryValueObject &Object) {
+    YamlIO.mapRequired("entry-value-register", Object.EntryValueRegister);
+    YamlIO.mapRequired("debug-info-variable", Object.DebugVar);
+    YamlIO.mapRequired("debug-info-expression", Object.DebugExpr);
+    YamlIO.mapRequired("debug-info-location", Object.DebugLoc);
+  }
   static const bool flow = true;
 };
 
@@ -407,9 +436,9 @@ template <> struct ScalarTraits<FrameIndex> {
   static StringRef input(StringRef Scalar, void *Ctx, FrameIndex &FI) {
     FI.IsFixed = false;
     StringRef Num;
-    if (Scalar.startswith("%stack.")) {
+    if (Scalar.starts_with("%stack.")) {
       Num = Scalar.substr(7);
-    } else if (Scalar.startswith("%fixed-stack.")) {
+    } else if (Scalar.starts_with("%fixed-stack.")) {
       Num = Scalar.substr(13);
       FI.IsFixed = true;
     } else {
@@ -428,6 +457,16 @@ template <> struct ScalarTraits<FrameIndex> {
   static QuotingType mustQuote(StringRef S) { return needsQuotes(S); }
 };
 
+/// Identifies call instruction location in machine function.
+struct MachineInstrLoc {
+  unsigned BlockNum;
+  unsigned Offset;
+
+  bool operator==(const MachineInstrLoc &Other) const {
+    return BlockNum == Other.BlockNum && Offset == Other.Offset;
+  }
+};
+
 /// Serializable representation of CallSiteInfo.
 struct CallSiteInfo {
   // Representation of call argument and register which is used to
@@ -438,16 +477,6 @@ struct CallSiteInfo {
 
     bool operator==(const ArgRegPair &Other) const {
       return Reg == Other.Reg && ArgNo == Other.ArgNo;
-    }
-  };
-
-  /// Identifies call instruction location in machine function.
-  struct MachineInstrLoc {
-    unsigned BlockNum;
-    unsigned Offset;
-
-    bool operator==(const MachineInstrLoc &Other) const {
-      return BlockNum == Other.BlockNum && Offset == Other.Offset;
     }
   };
 
@@ -566,16 +595,38 @@ template <> struct MappingTraits<MachineJumpTable::Entry> {
   }
 };
 
+struct CalledGlobal {
+  MachineInstrLoc CallSite;
+  StringValue Callee;
+  unsigned Flags;
+
+  bool operator==(const CalledGlobal &Other) const {
+    return CallSite == Other.CallSite && Callee == Other.Callee &&
+           Flags == Other.Flags;
+  }
+};
+
+template <> struct MappingTraits<CalledGlobal> {
+  static void mapping(IO &YamlIO, CalledGlobal &CG) {
+    YamlIO.mapRequired("bb", CG.CallSite.BlockNum);
+    YamlIO.mapRequired("offset", CG.CallSite.Offset);
+    YamlIO.mapRequired("callee", CG.Callee);
+    YamlIO.mapRequired("flags", CG.Flags);
+  }
+};
+
 } // end namespace yaml
 } // end namespace llvm
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::MachineFunctionLiveIn)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::VirtualRegisterDefinition)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::MachineStackObject)
+LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::EntryValueObject)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::FixedMachineStackObject)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::CallSiteInfo)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::MachineConstantPoolValue)
 LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::MachineJumpTable::Entry)
+LLVM_YAML_IS_SEQUENCE_VECTOR(llvm::yaml::CalledGlobal)
 
 namespace llvm {
 namespace yaml {
@@ -613,6 +664,7 @@ struct MachineFrameInfo {
   bool HasVAStart = false;
   bool HasMustTailInVarArgFunc = false;
   bool HasTailCall = false;
+  bool IsCalleeSavedInfoValid = false;
   unsigned LocalFrameSize = 0;
   StringValue SavePoint;
   StringValue RestorePoint;
@@ -636,7 +688,8 @@ struct MachineFrameInfo {
            HasMustTailInVarArgFunc == Other.HasMustTailInVarArgFunc &&
            HasTailCall == Other.HasTailCall &&
            LocalFrameSize == Other.LocalFrameSize &&
-           SavePoint == Other.SavePoint && RestorePoint == Other.RestorePoint;
+           SavePoint == Other.SavePoint && RestorePoint == Other.RestorePoint &&
+           IsCalleeSavedInfoValid == Other.IsCalleeSavedInfoValid;
   }
 };
 
@@ -664,6 +717,8 @@ template <> struct MappingTraits<MachineFrameInfo> {
     YamlIO.mapOptional("hasMustTailInVarArgFunc", MFI.HasMustTailInVarArgFunc,
                        false);
     YamlIO.mapOptional("hasTailCall", MFI.HasTailCall, false);
+    YamlIO.mapOptional("isCalleeSavedInfoValid", MFI.IsCalleeSavedInfoValid,
+                       false);
     YamlIO.mapOptional("localFrameSize", MFI.LocalFrameSize, (unsigned)0);
     YamlIO.mapOptional("savePoint", MFI.SavePoint,
                        StringValue()); // Don't print it out when it's empty.
@@ -699,11 +754,18 @@ struct MachineFunction {
   bool TracksRegLiveness = false;
   bool HasWinCFI = false;
 
+  // Computed properties that should be overridable
+  std::optional<bool> NoPHIs;
+  std::optional<bool> IsSSA;
+  std::optional<bool> NoVRegs;
+  std::optional<bool> HasFakeUses;
+
   bool CallsEHReturn = false;
   bool CallsUnwindInit = false;
-  bool HasEHCatchret = false;
+  bool HasEHContTarget = false;
   bool HasEHScopes = false;
   bool HasEHFunclets = false;
+  bool IsOutlined = false;
 
   bool FailsVerification = false;
   bool TracksDebugUserValues = false;
@@ -715,6 +777,7 @@ struct MachineFunction {
   // Frame information
   MachineFrameInfo FrameInfo;
   std::vector<FixedMachineStackObject> FixedStackObjects;
+  std::vector<EntryValueObject> EntryValueObjects;
   std::vector<MachineStackObject> StackObjects;
   std::vector<MachineConstantPoolValue> Constants; /// Constant pool.
   std::unique_ptr<MachineFunctionInfo> MachineFuncInfo;
@@ -722,6 +785,7 @@ struct MachineFunction {
   std::vector<DebugValueSubstitution> DebugValueSubstitutions;
   MachineJumpTable JumpTableInfo;
   std::vector<StringValue> MachineMetadataNodes;
+  std::vector<CalledGlobal> CalledGlobals;
   BlockStringValue Body;
 };
 
@@ -737,11 +801,19 @@ template <> struct MappingTraits<MachineFunction> {
     YamlIO.mapOptional("tracksRegLiveness", MF.TracksRegLiveness, false);
     YamlIO.mapOptional("hasWinCFI", MF.HasWinCFI, false);
 
+    // PHIs must be not be capitalized, since it will clash with the MIR opcode
+    // leading to false-positive FileCheck hits with CHECK-NOT
+    YamlIO.mapOptional("noPhis", MF.NoPHIs, std::optional<bool>());
+    YamlIO.mapOptional("isSSA", MF.IsSSA, std::optional<bool>());
+    YamlIO.mapOptional("noVRegs", MF.NoVRegs, std::optional<bool>());
+    YamlIO.mapOptional("hasFakeUses", MF.HasFakeUses, std::optional<bool>());
+
     YamlIO.mapOptional("callsEHReturn", MF.CallsEHReturn, false);
     YamlIO.mapOptional("callsUnwindInit", MF.CallsUnwindInit, false);
-    YamlIO.mapOptional("hasEHCatchret", MF.HasEHCatchret, false);
+    YamlIO.mapOptional("hasEHContTarget", MF.HasEHContTarget, false);
     YamlIO.mapOptional("hasEHScopes", MF.HasEHScopes, false);
     YamlIO.mapOptional("hasEHFunclets", MF.HasEHFunclets, false);
+    YamlIO.mapOptional("isOutlined", MF.IsOutlined, false);
     YamlIO.mapOptional("debugInstrRef", MF.UseDebugInstrRef, false);
 
     YamlIO.mapOptional("failsVerification", MF.FailsVerification, false);
@@ -758,6 +830,8 @@ template <> struct MappingTraits<MachineFunction> {
                        std::vector<FixedMachineStackObject>());
     YamlIO.mapOptional("stack", MF.StackObjects,
                        std::vector<MachineStackObject>());
+    YamlIO.mapOptional("entry_values", MF.EntryValueObjects,
+                       std::vector<EntryValueObject>());
     YamlIO.mapOptional("callSites", MF.CallSitesInfo,
                        std::vector<CallSiteInfo>());
     YamlIO.mapOptional("debugValueSubstitutions", MF.DebugValueSubstitutions,
@@ -770,6 +844,9 @@ template <> struct MappingTraits<MachineFunction> {
     if (!YamlIO.outputting() || !MF.MachineMetadataNodes.empty())
       YamlIO.mapOptional("machineMetadataNodes", MF.MachineMetadataNodes,
                          std::vector<StringValue>());
+    if (!YamlIO.outputting() || !MF.CalledGlobals.empty())
+      YamlIO.mapOptional("calledGlobals", MF.CalledGlobals,
+                         std::vector<CalledGlobal>());
     YamlIO.mapOptional("body", MF.Body, BlockStringValue());
   }
 };

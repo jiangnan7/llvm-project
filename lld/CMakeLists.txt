@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 3.13.4)
+cmake_minimum_required(VERSION 3.20.0)
+set(LLVM_SUBPROJECT_TITLE "LLD")
 
 if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
   set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
@@ -11,13 +12,6 @@ include(${LLVM_COMMON_CMAKE_UTILS}/Modules/CMakePolicy.cmake
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(lld)
   set(LLD_BUILT_STANDALONE TRUE)
-  if ("${CMAKE_VERSION}" VERSION_LESS "3.20.0")
-    message(WARNING
-      "Your CMake version is ${CMAKE_VERSION}. Starting with LLVM 17.0.0, the "
-      "minimum version of CMake required to build LLVM will become 3.20.0, and "
-      "using an older CMake will become an error. Please upgrade your CMake to "
-      "at least 3.20.0 now to avoid issues in the future!")
-  endif()
 endif()
 
 # Must go below project(..)
@@ -45,6 +39,10 @@ if(LLD_BUILT_STANDALONE)
   set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
   set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
 
+  separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+  add_definitions(${LLVM_DEFINITIONS_LIST})
+  list(APPEND CMAKE_REQUIRED_DEFINITIONS ${LLVM_DEFINITIONS_LIST})
+
   include(AddLLVM)
   include(TableGen)
   include(HandleLLVMOptions)
@@ -68,7 +66,10 @@ if(LLD_BUILT_STANDALONE)
 
     if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
       # Note: path not really used, except for checking if lit was found
-      set(LLVM_LIT ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+      set(LLVM_EXTERNAL_LIT ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+      if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/llvm-lit)
+        add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/llvm-lit utils/llvm-lit)
+      endif()
       if(NOT LLVM_UTILS_PROVIDED)
         add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/FileCheck utils/FileCheck)
         add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/not utils/not)
@@ -81,13 +82,13 @@ if(LLD_BUILT_STANDALONE)
       endif()
     else()
       # Seek installed Lit.
-      find_program(LLVM_LIT
+      find_program(LLVM_EXTERNAL_LIT
                    NAMES llvm-lit lit.py lit
                    PATHS "${LLVM_MAIN_SRC_DIR}/utils/lit"
                    DOC "Path to lit.py")
     endif()
 
-    if(LLVM_LIT)
+    if(LLVM_EXTERNAL_LIT)
       # Define the default arguments to use with 'lit', and an option for the user
       # to override.
       set(LIT_ARGS_DEFAULT "-sv")
@@ -105,10 +106,6 @@ if(LLD_BUILT_STANDALONE)
     else()
       set(LLVM_INCLUDE_TESTS OFF)
     endif()
-  endif()
-
-  if(LLVM_HAVE_LIBXAR)
-    set(XAR_LIB xar)
   endif()
 endif() # standalone
 
@@ -190,18 +187,15 @@ include_directories(BEFORE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
   )
 
-if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
-  install(DIRECTORY include/
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    FILES_MATCHING
-    PATTERN "*.h"
-    )
-endif()
-
 add_subdirectory(Common)
 add_subdirectory(tools/lld)
 
 if (LLVM_INCLUDE_TESTS)
+  add_custom_target(LLDUnitTests)
+  set_target_properties(LLDUnitTests PROPERTIES FOLDER "LLD/Tests")
+  if (TARGET llvm_gtest)
+    add_subdirectory(unittests)
+  endif()
   add_subdirectory(test)
 endif()
 
@@ -211,5 +205,43 @@ add_subdirectory(ELF)
 add_subdirectory(MachO)
 add_subdirectory(MinGW)
 add_subdirectory(wasm)
+
+add_custom_target(lld-headers)
+set_target_properties(lld-headers PROPERTIES FOLDER "Misc")
+if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
+  install(DIRECTORY include/lld
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT lld-headers
+    FILES_MATCHING
+    PATTERN "*.h"
+    PATTERN "*.inc"
+    )
+
+  if (NOT LLVM_ENABLE_IDE)
+    add_llvm_install_targets(install-lld-headers
+                             DEPENDS lld-headers
+                             COMPONENT lld-headers)
+  endif()
+endif()
+
+# Custom target to install all lld libraries
+add_custom_target(lld-libraries)
+if (NOT LLVM_ENABLE_IDE)
+  add_llvm_install_targets(install-lld-libraries
+                           DEPENDS lld-libraries
+                           COMPONENT lld-libraries)
+endif()
+
+get_property(LLD_LIBS GLOBAL PROPERTY LLD_ALL_LIBS)
+if(LLD_LIBS)
+  list(REMOVE_DUPLICATES LLD_LIBS)
+  foreach(lib ${LLD_LIBS})
+    add_dependencies(lld-libraries ${lib})
+    if(NOT LLVM_ENABLE_IDE)
+      add_dependencies(install-lld-libraries install-${lib})
+      add_dependencies(install-lld-libraries-stripped install-${lib}-stripped)
+    endif()
+  endforeach()
+endif()
 
 add_subdirectory(cmake/modules)

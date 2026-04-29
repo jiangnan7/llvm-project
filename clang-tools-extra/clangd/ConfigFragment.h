@@ -32,6 +32,7 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANGD_CONFIGFRAGMENT_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_CONFIGFRAGMENT_H
 
+#include "Config.h"
 #include "ConfigProvider.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
@@ -167,8 +168,16 @@ struct Fragment {
     /// etc). Valid values are:
     /// - A single path to a directory (absolute, or relative to the fragment)
     /// - Ancestors: search all parent directories (the default)
-    /// - None: do not use a compilation database, just default flags.
+    /// - std::nullopt: do not use a compilation database, just default flags.
     std::optional<Located<std::string>> CompilationDatabase;
+
+    /// Controls whether Clangd should use its own built-in system headers (like
+    /// stddef.h), or use the system headers from the query driver. Use the
+    /// option value 'Clangd' (default) to indicate Clangd's headers, and use
+    /// 'QueryDriver' to indicate QueryDriver's headers. `Clangd` is the
+    /// fallback if no query driver is supplied or if the query driver regex
+    /// string fails to match the compiler used in the CDB.
+    std::optional<Located<std::string>> BuiltinHeaders;
   };
   CompileFlagsBlock CompileFlags;
 
@@ -232,12 +241,8 @@ struct Fragment {
     ///
     /// Valid values are:
     /// - Strict
-    /// - None
+    /// - std::nullopt
     std::optional<Located<std::string>> UnusedIncludes;
-
-
-    /// Enable emitting diagnostics using stale preambles.
-    std::optional<Located<bool>> AllowStalePreamble;
 
     /// Controls if clangd should analyze missing #include directives.
     /// clangd will warn if no header providing a symbol is `#include`d
@@ -249,7 +254,7 @@ struct Fragment {
     ///
     /// Valid values are:
     /// - Strict
-    /// - None
+    /// - std::nullopt
     std::optional<Located<std::string>> MissingIncludes;
 
     /// Controls IncludeCleaner diagnostics.
@@ -258,6 +263,10 @@ struct Fragment {
       /// unused or missing. These can match any suffix of the header file in
       /// question.
       std::vector<Located<std::string>> IgnoreHeader;
+
+      /// If false (default), unused system headers will be ignored.
+      /// Standard library headers are analyzed regardless of this option.
+      std::optional<Located<bool>> AnalyzeAngledIncludes;
     };
     IncludesBlock Includes;
 
@@ -281,6 +290,13 @@ struct Fragment {
       ///     readability-braces-around-statements.ShortStatementLines: 2
       std::vector<std::pair<Located<std::string>, Located<std::string>>>
           CheckOptions;
+
+      /// Whether to run checks that may slow down clangd.
+      ///   Strict: Run only checks measured to be fast. (Default)
+      ///           This excludes recently-added checks we have not timed yet.
+      ///   Loose: Run checks unless they are known to be slow.
+      ///   None: Run checks regardless of their speed.
+      std::optional<Located<std::string>> FastCheckFilter;
     };
     ClangTidyBlock ClangTidy;
   };
@@ -293,6 +309,23 @@ struct Fragment {
     // ::). All nested namespaces are affected as well.
     // Affects availability of the AddUsing tweak.
     std::vector<Located<std::string>> FullyQualifiedNamespaces;
+
+    /// List of regexes for headers that should always be included with a
+    /// ""-style include. By default, and in case of a conflict with
+    /// AngledHeaders (i.e. a header matches a regex in both QuotedHeaders and
+    /// AngledHeaders), system headers use <> and non-system headers use "".
+    /// These can match any suffix of the header file in question.
+    /// Matching is performed against the absolute path of the header
+    /// within the project.
+    std::vector<Located<std::string>> QuotedHeaders;
+    /// List of regexes for headers that should always be included with a
+    /// <>-style include. By default, and in case of a conflict with
+    /// AngledHeaders (i.e. a header matches a regex in both QuotedHeaders and
+    /// AngledHeaders), system headers use <> and non-system headers use "".
+    /// These can match any suffix of the header file in question.
+    /// Matching is performed against the absolute path of the header
+    /// within the project.
+    std::vector<Located<std::string>> AngledHeaders;
   };
   StyleBlock Style;
 
@@ -301,6 +334,26 @@ struct Fragment {
     /// Whether code completion should include suggestions from scopes that are
     /// not visible. The required scope prefix will be inserted.
     std::optional<Located<bool>> AllScopes;
+    /// How to present the argument list between '()' and '<>':
+    /// valid values are enum Config::ArgumentListsPolicy values:
+    ///   None: Nothing at all
+    ///   OpenDelimiter: only opening delimiter "(" or "<"
+    ///   Delimiters: empty pair of delimiters "()" or "<>"
+    ///   FullPlaceholders: full name of both type and parameter
+    std::optional<Located<std::string>> ArgumentLists;
+    /// Add #include directives when accepting code completions. Config
+    /// equivalent of the CLI option '--header-insertion'
+    /// Valid values are enum Config::HeaderInsertionPolicy values:
+    ///   "IWYU": Include what you use. Insert the owning header for top-level
+    ///     symbols, unless the header is already directly included or the
+    ///     symbol is forward-declared
+    ///   "Never": Never insert headers
+    std::optional<Located<std::string>> HeaderInsertion;
+    /// Will suggest code patterns & snippets.
+    /// Values are Config::CodePatternsPolicy:
+    ///   All  => enable all code patterns and snippets suggestion
+    ///   None => disable all code patterns and snippets suggestion
+    std::optional<Located<std::string>> CodePatterns;
   };
   CompletionBlock Completion;
 
@@ -322,8 +375,24 @@ struct Fragment {
     std::optional<Located<bool>> DeducedTypes;
     /// Show designators in aggregate initialization.
     std::optional<Located<bool>> Designators;
+    /// Show defined symbol names at the end of a definition block.
+    std::optional<Located<bool>> BlockEnd;
+    /// Show parameter names and default values of default arguments after all
+    /// of the explicit arguments.
+    std::optional<Located<bool>> DefaultArguments;
+    /// Limit the length of type name hints. (0 means no limit)
+    std::optional<Located<uint32_t>> TypeNameLimit;
   };
   InlayHintsBlock InlayHints;
+
+  /// Configures semantic tokens that are produced by clangd.
+  struct SemanticTokensBlock {
+    /// Disables clangd to produce semantic tokens for the given kinds.
+    std::vector<Located<std::string>> DisabledKinds;
+    /// Disables clangd to assign semantic tokens with the given modifiers.
+    std::vector<Located<std::string>> DisabledModifiers;
+  };
+  SemanticTokensBlock SemanticTokens;
 };
 
 } // namespace config

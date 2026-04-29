@@ -15,10 +15,9 @@
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Pass/Pass.h"
 
 namespace mlir {
-#define GEN_PASS_DEF_CONVERTLINALGTOSTANDARD
+#define GEN_PASS_DEF_CONVERTLINALGTOSTANDARDPASS
 #include "mlir/Conversion/Passes.h.inc"
 } // namespace mlir
 
@@ -42,7 +41,7 @@ static SmallVector<Type, 4> extractOperandTypes(Operation *op) {
     // The underlying descriptor type (e.g. LLVM) does not have layout
     // information. Canonicalizing the type at the level of std when going into
     // a library call avoids needing to introduce DialectCastOp.
-    if (auto memrefType = type.dyn_cast<MemRefType>())
+    if (auto memrefType = dyn_cast<MemRefType>(type))
       result.push_back(makeStridedLayoutDynamic(memrefType));
     else
       result.push_back(type);
@@ -96,7 +95,7 @@ createTypeCanonicalizedMemRefOperands(OpBuilder &b, Location loc,
   SmallVector<Value, 4> res;
   res.reserve(operands.size());
   for (auto op : operands) {
-    auto memrefType = op.getType().dyn_cast<MemRefType>();
+    auto memrefType = dyn_cast<MemRefType>(op.getType());
     if (!memrefType) {
       res.push_back(op);
       continue;
@@ -133,7 +132,8 @@ void mlir::linalg::populateLinalgToStandardConversionPatterns(
 
 namespace {
 struct ConvertLinalgToStandardPass
-    : public impl::ConvertLinalgToStandardBase<ConvertLinalgToStandardPass> {
+    : public impl::ConvertLinalgToStandardPassBase<
+          ConvertLinalgToStandardPass> {
   void runOnOperation() override;
 };
 } // namespace
@@ -141,16 +141,12 @@ struct ConvertLinalgToStandardPass
 void ConvertLinalgToStandardPass::runOnOperation() {
   auto module = getOperation();
   ConversionTarget target(getContext());
-  target.addLegalDialect<AffineDialect, arith::ArithDialect, func::FuncDialect,
-                         memref::MemRefDialect, scf::SCFDialect>();
+  target.addLegalDialect<affine::AffineDialect, arith::ArithDialect,
+                         func::FuncDialect, memref::MemRefDialect,
+                         scf::SCFDialect>();
   target.addLegalOp<ModuleOp, func::FuncOp, func::ReturnOp>();
   RewritePatternSet patterns(&getContext());
   populateLinalgToStandardConversionPatterns(patterns);
   if (failed(applyFullConversion(module, target, std::move(patterns))))
     signalPassFailure();
-}
-
-std::unique_ptr<OperationPass<ModuleOp>>
-mlir::createConvertLinalgToStandardPass() {
-  return std::make_unique<ConvertLinalgToStandardPass>();
 }

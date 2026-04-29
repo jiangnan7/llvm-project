@@ -1257,7 +1257,7 @@ define <8 x float> @test_mm256_or_ps(<8 x float> %a0, <8 x float> %a1) nounwind 
 define <2 x double> @test_mm_permute_pd(<2 x double> %a0) nounwind {
 ; CHECK-LABEL: test_mm_permute_pd:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpermilpd {{.*#+}} xmm0 = xmm0[1,0]
+; CHECK-NEXT:    vshufpd {{.*#+}} xmm0 = xmm0[1,0]
 ; CHECK-NEXT:    ret{{[l|q]}}
   %res = shufflevector <2 x double> %a0, <2 x double> %a0, <2 x i32> <i32 1, i32 0>
   ret <2 x double> %res
@@ -1266,7 +1266,7 @@ define <2 x double> @test_mm_permute_pd(<2 x double> %a0) nounwind {
 define <4 x double> @test_mm256_permute_pd(<4 x double> %a0) nounwind {
 ; CHECK-LABEL: test_mm256_permute_pd:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpermilpd {{.*#+}} ymm0 = ymm0[1,0,3,2]
+; CHECK-NEXT:    vshufpd {{.*#+}} ymm0 = ymm0[1,0,3,2]
 ; CHECK-NEXT:    ret{{[l|q]}}
   %res = shufflevector <4 x double> %a0, <4 x double> %a0, <4 x i32> <i32 1, i32 0, i32 3, i32 2>
   ret <4 x double> %res
@@ -1899,7 +1899,7 @@ define <4 x i64> @test_mm256_set1_epi16(i16 %a0) nounwind {
 ; X86-NEXT:    movzwl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    vmovd %eax, %xmm0
 ; X86-NEXT:    vpshuflw {{.*#+}} xmm0 = xmm0[0,0,0,0,4,5,6,7]
-; X86-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,0,0,0]
+; X86-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,1,0,1]
 ; X86-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
 ; X86-NEXT:    retl
 ;
@@ -1907,7 +1907,7 @@ define <4 x i64> @test_mm256_set1_epi16(i16 %a0) nounwind {
 ; X64:       # %bb.0:
 ; X64-NEXT:    vmovd %edi, %xmm0
 ; X64-NEXT:    vpshuflw {{.*#+}} xmm0 = xmm0[0,0,0,0,4,5,6,7]
-; X64-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,0,0,0]
+; X64-NEXT:    vpshufd {{.*#+}} xmm0 = xmm0[0,1,0,1]
 ; X64-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
 ; X64-NEXT:    retq
   %res0  = insertelement <16 x i16> undef,  i16 %a0, i32 0

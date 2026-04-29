@@ -10,7 +10,8 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFDie.h"
-#include "llvm/DebugInfo/DWARF/DWARFExpression.h"
+#include "llvm/DebugInfo/DWARF/DWARFExpressionPrinter.h"
+#include "llvm/DebugInfo/DWARF/LowLevel/DWARFExpression.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -62,7 +63,7 @@ void DWARFExpressionCompactPrinterTest::TestExprPrinter(
   DWARFExpression Expr(DE, 8);
 
   auto GetRegName = [&](uint64_t DwarfRegNum, bool IsEH) -> StringRef {
-    if (std::optional<unsigned> LLVMRegNum =
+    if (std::optional<MCRegister> LLVMRegNum =
             this->MRI->getLLVMRegNum(DwarfRegNum, IsEH))
       if (const char *RegName = this->MRI->getName(*LLVMRegNum))
         return llvm::StringRef(RegName);
@@ -70,7 +71,7 @@ void DWARFExpressionCompactPrinterTest::TestExprPrinter(
     return {};
   };
 
-  Expr.printCompact(OS, GetRegName);
+  printDwarfExpressionCompact(&Expr, OS, GetRegName);
   EXPECT_EQ(OS.str(), Expected);
 }
 
@@ -123,4 +124,21 @@ TEST_F(DWARFExpressionCompactPrinterTest, Test_OP_entry_value_mem) {
   TestExprPrinter(
       {DW_OP_entry_value, 0x02, DW_OP_breg13, 0x10, DW_OP_stack_value},
       "entry([SP+16])");
+}
+
+TEST_F(DWARFExpressionCompactPrinterTest, Test_OP_nop) {
+  TestExprPrinter({DW_OP_nop}, "<stack of size 0, expected 1>");
+}
+
+TEST_F(DWARFExpressionCompactPrinterTest, Test_OP_LLVM_nop) {
+  TestExprPrinter({DW_OP_LLVM_user, DW_OP_LLVM_nop},
+                  "<stack of size 0, expected 1>");
+}
+
+TEST_F(DWARFExpressionCompactPrinterTest, Test_OP_nop_OP_reg) {
+  TestExprPrinter({DW_OP_nop, DW_OP_reg0}, "R0");
+}
+
+TEST_F(DWARFExpressionCompactPrinterTest, Test_OP_LLVM_nop_OP_reg) {
+  TestExprPrinter({DW_OP_LLVM_user, DW_OP_LLVM_nop, DW_OP_reg0}, "R0");
 }

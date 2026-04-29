@@ -13,15 +13,16 @@
 #include "llvm/Transforms/IPO/SCCP.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Analysis/AssumptionCache.h"
-#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueLattice.h"
 #include "llvm/Analysis/ValueLatticeUtils.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/InitializePasses.h"
+#include "llvm/IR/AttributeMask.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ModRef.h"
@@ -42,8 +43,8 @@ STATISTIC(NumDeadBlocks , "Number of basic blocks unreachable");
 STATISTIC(NumInstReplaced,
           "Number of instructions replaced with (simpler) instruction");
 
-static cl::opt<unsigned> FuncSpecializationMaxIters(
-    "func-specialization-max-iters", cl::init(1), cl::Hidden, cl::desc(
+static cl::opt<unsigned> FuncSpecMaxIters(
+    "funcspec-max-iters", cl::init(10), cl::Hidden, cl::desc(
     "The maximum number of iterations function specialization is run"));
 
 static void findReturnsToZap(Function &F,
@@ -75,10 +76,8 @@ static void findReturnsToZap(Function &F,
                if (!isa<CallBase>(U))
                  return true;
                if (U->getType()->isStructTy()) {
-                 return all_of(Solver.getStructLatticeValueFor(U),
-                               [](const ValueLatticeElement &LV) {
-                                 return !SCCPSolver::isOverdefined(LV);
-                               });
+                 return none_of(Solver.getStructLatticeValueFor(U),
+                                SCCPSolver::isOverdefined);
                }
 
                // We don't consider assume-like intrinsics to be actual address
@@ -111,10 +110,12 @@ static bool runIPSCCP(
     std::function<const TargetLibraryInfo &(Function &)> GetTLI,
     std::function<TargetTransformInfo &(Function &)> GetTTI,
     std::function<AssumptionCache &(Function &)> GetAC,
-    function_ref<AnalysisResultsForFn(Function &)> getAnalysis,
+    std::function<DominatorTree &(Function &)> GetDT,
+    std::function<BlockFrequencyInfo &(Function &)> GetBFI,
     bool IsFuncSpecEnabled) {
   SCCPSolver Solver(DL, GetTLI, M.getContext());
-  FunctionSpecializer Specializer(Solver, M, FAM, GetTLI, GetTTI, GetAC);
+  FunctionSpecializer Specializer(Solver, M, FAM, GetBFI, GetTLI, GetTTI,
+                                  GetAC);
 
   // Loop over all functions, marking arguments to those with their addresses
   // taken or that are external as overdefined.
@@ -122,7 +123,9 @@ static bool runIPSCCP(
     if (F.isDeclaration())
       continue;
 
-    Solver.addAnalysis(F, getAnalysis(F));
+    DominatorTree &DT = GetDT(F);
+    AssumptionCache &AC = GetAC(F);
+    Solver.addPredicateInfo(F, DT, AC);
 
     // Determine if we can track the function's return values. If so, add the
     // function to the solver's set of return-tracked functions.
@@ -139,9 +142,8 @@ static bool runIPSCCP(
     // Assume the function is called.
     Solver.markBlockExecutable(&F.front());
 
-    // Assume nothing about the incoming arguments.
     for (Argument &AI : F.args())
-      Solver.markOverdefined(&AI);
+      Solver.trackValueOfArgument(&AI);
   }
 
   // Determine if we can track any of the module's global variables. If so, add
@@ -158,7 +160,7 @@ static bool runIPSCCP(
 
   if (IsFuncSpecEnabled) {
     unsigned Iters = 0;
-    while (Iters++ < FuncSpecializationMaxIters && Specializer.run());
+    while (Iters++ < FuncSpecMaxIters && Specializer.run());
   }
 
   // Iterate over all of the instructions in the module, replacing them with
@@ -187,8 +189,10 @@ static bool runIPSCCP(
           if (ME == MemoryEffects::unknown())
             return AL;
 
-          ME |= MemoryEffects(MemoryEffects::Other,
-                              ME.getModRef(MemoryEffects::ArgMem));
+          ModRefInfo ArgMemMR = ME.getModRef(IRMemLocation::ArgMem);
+          ME |= MemoryEffects(IRMemLocation::ErrnoMem, ArgMemMR);
+          ME |= MemoryEffects(IRMemLocation::Other, ArgMemMR);
+
           return AL.addFnAttribute(
               F.getContext(),
               Attribute::getWithMemoryEffects(F.getContext(), ME));
@@ -223,20 +227,19 @@ static bool runIPSCCP(
           BB, InsertedValues, NumInstRemoved, NumInstReplaced);
     }
 
-    DomTreeUpdater DTU = IsFuncSpecEnabled && Specializer.isClonedFunction(&F)
-        ? DomTreeUpdater(DomTreeUpdater::UpdateStrategy::Lazy)
-        : Solver.getDTU(F);
-
+    DominatorTree *DT = FAM->getCachedResult<DominatorTreeAnalysis>(F);
+    PostDominatorTree *PDT = FAM->getCachedResult<PostDominatorTreeAnalysis>(F);
+    DomTreeUpdater DTU(DT, PDT, DomTreeUpdater::UpdateStrategy::Lazy);
     // Change dead blocks to unreachable. We do it after replacing constants
     // in all executable blocks, because changeToUnreachable may remove PHI
     // nodes in executable blocks we found values for. The function's entry
     // block is not part of BlocksToErase, so we have to handle it separately.
     for (BasicBlock *BB : BlocksToErase) {
-      NumInstRemoved += changeToUnreachable(BB->getFirstNonPHI(),
+      NumInstRemoved += changeToUnreachable(&*BB->getFirstNonPHIOrDbg(),
                                             /*PreserveLCSSA=*/false, &DTU);
     }
     if (!Solver.isBlockExecutable(&F.front()))
-      NumInstRemoved += changeToUnreachable(F.front().getFirstNonPHI(),
+      NumInstRemoved += changeToUnreachable(&*F.front().getFirstNonPHIOrDbg(),
                                             /*PreserveLCSSA=*/false, &DTU);
 
     BasicBlock *NewUnreachableBB = nullptr;
@@ -247,19 +250,7 @@ static bool runIPSCCP(
       if (!DeadBB->hasAddressTaken())
         DTU.deleteBB(DeadBB);
 
-    for (BasicBlock &BB : F) {
-      for (Instruction &Inst : llvm::make_early_inc_range(BB)) {
-        if (Solver.getPredicateInfoFor(&Inst)) {
-          if (auto *II = dyn_cast<IntrinsicInst>(&Inst)) {
-            if (II->getIntrinsicID() == Intrinsic::ssa_copy) {
-              Value *Op = II->getOperand(0);
-              Inst.replaceAllUsesWith(Op);
-              Inst.eraseFromParent();
-            }
-          }
-        }
-      }
-    }
+    Solver.removeSSACopies(F);
   }
 
   // If we inferred constant or undef return values for a function, we replaced
@@ -274,40 +265,11 @@ static bool runIPSCCP(
   // whether other functions are optimizable.
   SmallVector<ReturnInst*, 8> ReturnsToZap;
 
-  for (const auto &I : Solver.getTrackedRetVals()) {
-    Function *F = I.first;
-    const ValueLatticeElement &ReturnValue = I.second;
-
-    // If there is a known constant range for the return value, add !range
-    // metadata to the function's call sites.
-    if (ReturnValue.isConstantRange() &&
-        !ReturnValue.getConstantRange().isSingleElement()) {
-      // Do not add range metadata if the return value may include undef.
-      if (ReturnValue.isConstantRangeIncludingUndef())
-        continue;
-
-      auto &CR = ReturnValue.getConstantRange();
-      for (User *User : F->users()) {
-        auto *CB = dyn_cast<CallBase>(User);
-        if (!CB || CB->getCalledFunction() != F)
-          continue;
-
-        // Do not touch existing metadata for now.
-        // TODO: We should be able to take the intersection of the existing
-        // metadata and the inferred range.
-        if (CB->getMetadata(LLVMContext::MD_range))
-          continue;
-
-        LLVMContext &Context = CB->getParent()->getContext();
-        Metadata *RangeMD[] = {
-            ConstantAsMetadata::get(ConstantInt::get(Context, CR.getLower())),
-            ConstantAsMetadata::get(ConstantInt::get(Context, CR.getUpper()))};
-        CB->setMetadata(LLVMContext::MD_range, MDNode::get(Context, RangeMD));
-      }
-      continue;
-    }
-    if (F->getReturnType()->isVoidTy())
-      continue;
+  Solver.inferReturnAttributes();
+  Solver.inferArgAttributes();
+  for (const auto &[F, ReturnValue] : Solver.getTrackedRetVals()) {
+    assert(!F->getReturnType()->isVoidTy() &&
+           "should not track void functions");
     if (SCCPSolver::isConstant(ReturnValue) || ReturnValue.isUnknownOrUndef())
       findReturnsToZap(*F, ReturnsToZap, Solver);
   }
@@ -324,7 +286,7 @@ static bool runIPSCCP(
   SmallSetVector<Function *, 8> FuncZappedReturn;
   for (ReturnInst *RI : ReturnsToZap) {
     Function *F = RI->getParent()->getParent();
-    RI->setOperand(0, UndefValue::get(F->getReturnType()));
+    RI->setOperand(0, PoisonValue::get(F->getReturnType()));
     // Record all functions that are zapped.
     FuncZappedReturn.insert(F);
   }
@@ -342,11 +304,10 @@ static bool runIPSCCP(
     for (Use &U : F->uses()) {
       CallBase *CB = dyn_cast<CallBase>(U.getUser());
       if (!CB) {
-        assert(isa<BlockAddress>(U.getUser()) ||
-               (isa<Constant>(U.getUser()) &&
-                all_of(U.getUser()->users(), [](const User *UserUser) {
-                  return cast<IntrinsicInst>(UserUser)->isAssumeLikeIntrinsic();
-                })));
+        assert(isa<Constant>(U.getUser()) &&
+               all_of(U.getUser()->users(), [](const User *UserUser) {
+                 return cast<IntrinsicInst>(UserUser)->isAssumeLikeIntrinsic();
+               }));
         continue;
       }
 
@@ -364,11 +325,27 @@ static bool runIPSCCP(
       continue;
     LLVM_DEBUG(dbgs() << "Found that GV '" << GV->getName()
                       << "' is constant!\n");
-    while (!GV->use_empty()) {
-      StoreInst *SI = cast<StoreInst>(GV->user_back());
-      SI->eraseFromParent();
-      MadeChanges = true;
+    for (User *U : make_early_inc_range(GV->users())) {
+      // We can remove LoadInst here, because we already replaced its users
+      // with a constant.
+      assert((isa<StoreInst>(U) || isa<LoadInst>(U)) &&
+             "Only Store|Load Instruction can be user of GlobalVariable at "
+             "reaching here.");
+      cast<Instruction>(U)->eraseFromParent();
     }
+
+    // Try to create a debug constant expression for the global variable
+    // initializer value.
+    SmallVector<DIGlobalVariableExpression *, 1> GVEs;
+    GV->getDebugInfo(GVEs);
+    if (GVEs.size() == 1) {
+      DIBuilder DIB(M);
+      if (DIExpression *InitExpr = getExpressionForConstant(
+              DIB, *GV->getInitializer(), *GV->getValueType()))
+        GVEs[0]->replaceOperandWith(1, InitExpr);
+    }
+
+    MadeChanges = true;
     M.eraseGlobalVariable(GV);
     ++NumGlobalConst;
   }
@@ -388,15 +365,15 @@ PreservedAnalyses IPSCCPPass::run(Module &M, ModuleAnalysisManager &AM) {
   auto GetAC = [&FAM](Function &F) -> AssumptionCache & {
     return FAM.getResult<AssumptionAnalysis>(F);
   };
-  auto getAnalysis = [&FAM, this](Function &F) -> AnalysisResultsForFn {
-    DominatorTree &DT = FAM.getResult<DominatorTreeAnalysis>(F);
-    return {
-        std::make_unique<PredicateInfo>(F, DT, FAM.getResult<AssumptionAnalysis>(F)),
-        &DT, FAM.getCachedResult<PostDominatorTreeAnalysis>(F),
-        isFuncSpecEnabled() ? &FAM.getResult<LoopAnalysis>(F) : nullptr };
+  auto GetDT = [&FAM](Function &F) -> DominatorTree & {
+    return FAM.getResult<DominatorTreeAnalysis>(F);
+  };
+  auto GetBFI = [&FAM](Function &F) -> BlockFrequencyInfo & {
+    return FAM.getResult<BlockFrequencyAnalysis>(F);
   };
 
-  if (!runIPSCCP(M, DL, &FAM, GetTLI, GetTTI, GetAC, getAnalysis,
+
+  if (!runIPSCCP(M, DL, &FAM, GetTLI, GetTTI, GetAC, GetDT, GetBFI,
                  isFuncSpecEnabled()))
     return PreservedAnalyses::all();
 

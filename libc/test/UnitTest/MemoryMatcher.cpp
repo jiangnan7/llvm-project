@@ -8,8 +8,15 @@
 
 #include "MemoryMatcher.h"
 
-namespace __llvm_libc {
-namespace memory {
+#include "src/__support/ctype_utils.h"
+#include "src/__support/macros/config.h"
+#include "test/UnitTest/Test.h"
+
+#if LIBC_TEST_HAS_MATCHERS()
+
+using LIBC_NAMESPACE::testing::tlog;
+
+namespace LIBC_NAMESPACE_DECL {
 namespace testing {
 
 template <typename T>
@@ -32,45 +39,47 @@ bool MemoryMatcher::match(MemoryView actualValue) {
   return equals(expected, actual, mismatch_size, mismatch_index);
 }
 
-void display(testutils::StreamWrapper &Stream, char C) {
-  const auto print = [&Stream](unsigned char I) {
-    Stream << static_cast<char>(I < 10 ? '0' + I : 'A' + I - 10);
+static void display(char C) {
+  const auto print = [](unsigned char I) {
+    tlog << static_cast<char>(LIBC_NAMESPACE::internal::toupper(
+        LIBC_NAMESPACE::internal::int_to_b36_char(I)));
   };
   print(static_cast<unsigned char>(C) / 16);
   print(static_cast<unsigned char>(C) & 15);
 }
 
-void display(testutils::StreamWrapper &Stream, MemoryView View) {
+static void display(MemoryView View) {
   for (auto C : View) {
-    Stream << ' ';
-    display(Stream, C);
+    tlog << ' ';
+    display(C);
   }
 }
 
-void MemoryMatcher::explainError(testutils::StreamWrapper &Stream) {
+void MemoryMatcher::explainError() {
   if (mismatch_size) {
-    Stream << "Size mismatch :";
-    Stream << "expected : ";
-    Stream << expected.size();
-    Stream << '\n';
-    Stream << "actual   : ";
-    Stream << actual.size();
-    Stream << '\n';
+    tlog << "Size mismatch :";
+    tlog << "expected : ";
+    tlog << expected.size();
+    tlog << '\n';
+    tlog << "actual   : ";
+    tlog << actual.size();
+    tlog << '\n';
   } else {
-    Stream << "Mismatch at position : ";
-    Stream << mismatch_index;
-    Stream << " / ";
-    Stream << expected.size();
-    Stream << "\n";
-    Stream << "expected :";
-    display(Stream, expected);
-    Stream << '\n';
-    Stream << "actual   :";
-    display(Stream, actual);
-    Stream << '\n';
+    tlog << "Mismatch at position : ";
+    tlog << mismatch_index;
+    tlog << " / ";
+    tlog << expected.size();
+    tlog << "\n";
+    tlog << "expected :";
+    display(expected);
+    tlog << '\n';
+    tlog << "actual   :";
+    display(actual);
+    tlog << '\n';
   }
 }
 
 } // namespace testing
-} // namespace memory
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE_DECL
+
+#endif // LIBC_TEST_HAS_MATCHERS()

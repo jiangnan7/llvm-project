@@ -25,12 +25,15 @@
 
 using namespace llvm;
 
-CCState::CCState(CallingConv::ID CC, bool isVarArg, MachineFunction &mf,
-                 SmallVectorImpl<CCValAssign> &locs, LLVMContext &C)
-    : CallingConv(CC), IsVarArg(isVarArg), MF(mf),
-      TRI(*MF.getSubtarget().getRegisterInfo()), Locs(locs), Context(C) {
+CCState::CCState(CallingConv::ID CC, bool IsVarArg, MachineFunction &MF,
+                 SmallVectorImpl<CCValAssign> &Locs, LLVMContext &Context,
+                 bool NegativeOffsets)
+    : CallingConv(CC), IsVarArg(IsVarArg), MF(MF),
+      TRI(*MF.getSubtarget().getRegisterInfo()), Locs(Locs), Context(Context),
+      NegativeOffsets(NegativeOffsets) {
+
   // No stack is used.
-  StackOffset = 0;
+  StackSize = 0;
 
   clearByValRegsInfo();
   UsedRegs.resize((TRI.getNumRegs()+31)/32);
@@ -51,19 +54,19 @@ void CCState::HandleByVal(unsigned ValNo, MVT ValVT, MVT LocVT,
   ensureMaxAlignment(Alignment);
   MF.getSubtarget().getTargetLowering()->HandleByVal(this, Size, Alignment);
   Size = unsigned(alignTo(Size, MinAlign));
-  unsigned Offset = AllocateStack(Size, Alignment);
+  uint64_t Offset = AllocateStack(Size, Alignment);
   addLoc(CCValAssign::getMem(ValNo, ValVT, Offset, LocVT, LocInfo));
 }
 
 /// Mark a register and all of its aliases as allocated.
 void CCState::MarkAllocated(MCPhysReg Reg) {
   for (MCRegAliasIterator AI(Reg, &TRI, true); AI.isValid(); ++AI)
-    UsedRegs[*AI / 32] |= 1 << (*AI & 31);
+    UsedRegs[(*AI).id() / 32] |= 1 << ((*AI).id() & 31);
 }
 
 void CCState::MarkUnallocated(MCPhysReg Reg) {
   for (MCRegAliasIterator AI(Reg, &TRI, true); AI.isValid(); ++AI)
-    UsedRegs[*AI / 32] &= ~(1 << (*AI & 31));
+    UsedRegs[(*AI).id() / 32] &= ~(1 << ((*AI).id() & 31));
 }
 
 bool CCState::IsShadowAllocatedReg(MCRegister Reg) const {
@@ -195,9 +198,9 @@ static bool isValueTypeInRegForCC(CallingConv::ID CC, MVT VT) {
   return (CC == CallingConv::X86_VectorCall || CC == CallingConv::X86_FastCall);
 }
 
-void CCState::getRemainingRegParmsForType(SmallVectorImpl<MCPhysReg> &Regs,
+void CCState::getRemainingRegParmsForType(SmallVectorImpl<MCRegister> &Regs,
                                           MVT VT, CCAssignFn Fn) {
-  unsigned SavedStackOffset = StackOffset;
+  uint64_t SavedStackSize = StackSize;
   Align SavedMaxStackArgAlign = MaxStackArgAlign;
   unsigned NumLocs = Locs.size();
 
@@ -224,12 +227,12 @@ void CCState::getRemainingRegParmsForType(SmallVectorImpl<MCPhysReg> &Regs,
   assert(NumLocs < Locs.size() && "CC assignment failed to add location");
   for (unsigned I = NumLocs, E = Locs.size(); I != E; ++I)
     if (Locs[I].isRegLoc())
-      Regs.push_back(MCPhysReg(Locs[I].getLocReg()));
+      Regs.push_back(Locs[I].getLocReg());
 
   // Clear the assigned values and stack memory. We leave the registers marked
   // as allocated so that future queries don't return the same registers, i.e.
   // when i64 and f64 are both passed in GPRs.
-  StackOffset = SavedStackOffset;
+  StackSize = SavedStackSize;
   MaxStackArgAlign = SavedMaxStackArgAlign;
   Locs.truncate(NumLocs);
 }
@@ -244,11 +247,11 @@ void CCState::analyzeMustTailForwardedRegisters(
   SaveAndRestore SavedMustTail(AnalyzingMustTailForwardedRegs, true);
 
   for (MVT RegVT : RegParmTypes) {
-    SmallVector<MCPhysReg, 8> RemainingRegs;
+    SmallVector<MCRegister, 8> RemainingRegs;
     getRemainingRegParmsForType(RemainingRegs, RegVT, Fn);
     const TargetLowering *TL = MF.getSubtarget().getTargetLowering();
     const TargetRegisterClass *RC = TL->getRegClassFor(RegVT);
-    for (MCPhysReg PReg : RemainingRegs) {
+    for (MCRegister PReg : RemainingRegs) {
       Register VReg = MF.addLiveIn(PReg, RC);
       Forwards.push_back(ForwardedRegister(VReg, PReg, RegVT));
     }

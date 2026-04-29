@@ -16,7 +16,7 @@ typedef struct {
 void simple_hfa(HFA h) {}
 
 // CHECK: define{{.*}} %struct.HFA @return_simple_hfa
-HFA return_simple_hfa() {}
+HFA return_simple_hfa() { return (HFA){0}; }
 
 typedef struct {
   double arr[4];
@@ -42,8 +42,8 @@ typedef struct {
 // CHECK: define{{.*}} void @big_struct_indirect(ptr noundef %b)
 void big_struct_indirect(BigStruct b) {}
 
-// CHECK: define{{.*}} void @return_big_struct_indirect(ptr noalias sret
-BigStruct return_big_struct_indirect() {}
+// CHECK: define{{.*}} void @return_big_struct_indirect(ptr dead_on_unwind noalias writable sret
+BigStruct return_big_struct_indirect() { return (BigStruct){0}; }
 
 // Structs smaller than 16 bytes should be passed directly, and coerced to
 // either [N x i32] or [N x i64] depending on alignment requirements.
@@ -58,7 +58,7 @@ typedef struct {
 void small_struct_direct(SmallStruct s) {}
 
 // CHECK: define{{.*}} [4 x i32] @return_small_struct_direct()
-SmallStruct return_small_struct_direct() {}
+SmallStruct return_small_struct_direct() { return (SmallStruct){0}; }
 
 typedef struct {
   float x;
@@ -75,20 +75,21 @@ typedef struct {
 } PaddedSmallStruct;
 
 // CHECK: define{{.*}} i32 @return_padded_small_struct()
-PaddedSmallStruct return_padded_small_struct() {}
+PaddedSmallStruct return_padded_small_struct() { return (PaddedSmallStruct){0}; }
 
 typedef struct {
   char arr[7];
 } OddlySizedStruct;
 
 // CHECK: define{{.*}} [2 x i32] @return_oddly_sized_struct()
-OddlySizedStruct return_oddly_sized_struct() {}
+OddlySizedStruct return_oddly_sized_struct() { return (OddlySizedStruct){0}; }
 
 // CHECK: define{{.*}} <4 x float> @test_va_arg_vec(ptr noundef %l)
-// CHECK:   [[ALIGN_TMP:%.*]] = add i32 {{%.*}}, 15
-// CHECK:   [[ALIGNED:%.*]] = and i32 [[ALIGN_TMP]], -16
-// CHECK:   [[ALIGNED_I8:%.*]] = inttoptr i32 [[ALIGNED]] to ptr
-// CHECK:   load <4 x float>, ptr [[ALIGNED_I8]], align 16
+
+
+// CHECK: [[GEP_ALIGN:%.+]] = getelementptr inbounds i8, ptr {{%.*}}, i32 15
+// CHECK: [[ALIGNED:%.*]] = call ptr @llvm.ptrmask.p0.i32(ptr [[GEP_ALIGN]], i32 -16)
+// CHECK:   load <4 x float>, ptr [[ALIGNED]], align 16
 float32x4_t test_va_arg_vec(__builtin_va_list l) {
   return __builtin_va_arg(l, float32x4_t);
 }

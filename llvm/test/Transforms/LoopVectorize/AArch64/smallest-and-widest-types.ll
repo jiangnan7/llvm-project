@@ -37,7 +37,7 @@ for.end:
 ; chosen. The following 3 cases check different combinations of widths.
 
 ; CHECK-LABEL: Checking a loop in 'no_loads_stores_32'
-; CHECK: The Smallest and Widest types: 4294967295 / 32 bits
+; CHECK: The Smallest and Widest types: 32 / 64 bits
 ; CHECK: Selecting VF: 4
 
 define double @no_loads_stores_32(i32 %n) {
@@ -60,7 +60,7 @@ for.end:
 }
 
 ; CHECK-LABEL: Checking a loop in 'no_loads_stores_16'
-; CHECK: The Smallest and Widest types: 4294967295 / 16 bits
+; CHECK: The Smallest and Widest types: 16 / 64 bits
 ; CHECK: Selecting VF: 8
 
 define double @no_loads_stores_16() {
@@ -82,7 +82,7 @@ for.end:
 }
 
 ; CHECK-LABEL: Checking a loop in 'no_loads_stores_8'
-; CHECK: The Smallest and Widest types: 4294967295 / 8 bits
+; CHECK: The Smallest and Widest types: 8 / 32 bits
 ; CHECK: Selecting VF: 16
 
 define float @no_loads_stores_8() {
@@ -95,7 +95,7 @@ for.body:
   %conv = sitofp i8 %i.08 to float
   %add = fadd float %s.09, %conv
   %inc = add nuw nsw i8 %i.08, 1
-  %exitcond.not = icmp eq i8 %inc, 12345
+  %exitcond.not = icmp eq i8 %inc, 241
   br i1 %exitcond.not, label %for.end, label %for.body
 
 for.end:

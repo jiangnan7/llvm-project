@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_SEMA_ANALYSISBASEDWARNINGS_H
 #define LLVM_CLANG_SEMA_ANALYSISBASEDWARNINGS_H
 
+#include "clang/AST/Decl.h"
 #include "llvm/ADT/DenseMap.h"
 #include <memory>
 
@@ -24,6 +25,7 @@ class QualType;
 class Sema;
 namespace sema {
   class FunctionScopeInfo;
+  class SemaPPCallbacks;
 }
 
 namespace sema {
@@ -32,10 +34,15 @@ class AnalysisBasedWarnings {
 public:
   class Policy {
     friend class AnalysisBasedWarnings;
+    friend class SemaPPCallbacks;
     // The warnings to run.
+    LLVM_PREFERRED_TYPE(bool)
     unsigned enableCheckFallThrough : 1;
+    LLVM_PREFERRED_TYPE(bool)
     unsigned enableCheckUnreachable : 1;
+    LLVM_PREFERRED_TYPE(bool)
     unsigned enableThreadSafetyAnalysis : 1;
+    LLVM_PREFERRED_TYPE(bool)
     unsigned enableConsumedAnalysis : 1;
   public:
     Policy();
@@ -44,13 +51,15 @@ public:
 
 private:
   Sema &S;
-  Policy DefaultPolicy;
 
   class InterProceduralData;
   std::unique_ptr<InterProceduralData> IPData;
 
   enum VisitFlag { NotVisited = 0, Visited = 1, Pending = 2 };
   llvm::DenseMap<const FunctionDecl*, VisitFlag> VisitedFD;
+
+  Policy PolicyOverrides;
+  void clearOverrides();
 
   /// \name Statistics
   /// @{
@@ -95,7 +104,16 @@ public:
   void IssueWarnings(Policy P, FunctionScopeInfo *fscope,
                      const Decl *D, QualType BlockType);
 
-  Policy getDefaultPolicy() { return DefaultPolicy; }
+  // Issue warnings that require whole-translation-unit analysis.
+  void IssueWarnings(TranslationUnitDecl *D);
+
+  // Gets the default policy which is in effect at the given source location.
+  Policy getPolicyInEffectAt(SourceLocation Loc);
+
+  // Get the policies we may want to override due to things like #pragma clang
+  // diagnostic handling. If a caller sets any of these policies to true, that
+  // will override the policy used to issue warnings.
+  Policy &getPolicyOverrides() { return PolicyOverrides; }
 
   void PrintStats() const;
 };

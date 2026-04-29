@@ -51,6 +51,7 @@ static_library("MCTargetDesc") {
   deps = [
     ":ARMGenAsmWriter",
     ":ARMGenMCCodeEmitter",
+    "//llvm/lib/CodeGen",
     "//llvm/lib/MC",
     "//llvm/lib/MC/MCDisassembler",
     "//llvm/lib/Support",
@@ -66,7 +67,6 @@ static_library("MCTargetDesc") {
     "ARMInstPrinter.cpp",
     "ARMMCAsmInfo.cpp",
     "ARMMCCodeEmitter.cpp",
-    "ARMMCExpr.cpp",
     "ARMMCTargetDesc.cpp",
     "ARMMachORelocationInfo.cpp",
     "ARMMachObjectWriter.cpp",

@@ -1,9 +1,14 @@
 add_mlir_dialect_library(MLIRArithTransforms
+  BufferDeallocationOpInterfaceImpl.cpp
   BufferizableOpInterfaceImpl.cpp
-  Bufferize.cpp
+  BufferViewFlowOpInterfaceImpl.cpp
+  EmulateUnsupportedFloats.cpp
   EmulateWideInt.cpp
+  EmulateNarrowType.cpp
   ExpandOps.cpp
   IntRangeOptimizations.cpp
+  ReifyValueBounds.cpp
+  ShardingInterfaceImpl.cpp
   UnsignedWhenEquivalent.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -22,8 +27,12 @@ add_mlir_dialect_library(MLIRArithTransforms
   MLIRInferIntRangeInterface
   MLIRIR
   MLIRMemRefDialect
+  MLIRMeshDialect
   MLIRPass
+  MLIRShardingInterface
+  MLIRTensorDialect
   MLIRTransforms
   MLIRTransformUtils
+  MLIRValueBoundsOpInterface
   MLIRVectorDialect
   )

@@ -9,13 +9,13 @@
 #include "clang/Driver/Job.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Driver/Driver.h"
-#include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/InputInfo.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -25,7 +25,6 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
-#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <string>
@@ -68,14 +67,15 @@ static bool skipArgs(const char *Flag, bool HaveCrashVFS, int &SkipNum,
     return true;
 
   // Some include flags shouldn't be skipped if we have a crash VFS
-  IsInclude = llvm::StringSwitch<bool>(Flag)
-    .Cases("-include", "-header-include-file", true)
-    .Cases("-idirafter", "-internal-isystem", "-iwithprefix", true)
-    .Cases("-internal-externc-isystem", "-iprefix", true)
-    .Cases("-iwithprefixbefore", "-isystem", "-iquote", true)
-    .Cases("-isysroot", "-I", "-F", "-resource-dir", true)
-    .Cases("-iframework", "-include-pch", true)
-    .Default(false);
+  IsInclude =
+      llvm::StringSwitch<bool>(Flag)
+          .Cases("-include", "-header-include-file", true)
+          .Cases("-idirafter", "-internal-isystem", "-iwithprefix", true)
+          .Cases("-internal-externc-isystem", "-iprefix", true)
+          .Cases("-iwithprefixbefore", "-isystem", "-iquote", true)
+          .Cases("-isysroot", "-I", "-F", "-resource-dir", true)
+          .Cases("-internal-iframework", "-iframework", "-include-pch", true)
+          .Default(false);
   if (IsInclude)
     return !HaveCrashVFS;
 
@@ -94,10 +94,10 @@ static bool skipArgs(const char *Flag, bool HaveCrashVFS, int &SkipNum,
 
   // These flags are treated as a single argument (e.g., -F<Dir>).
   StringRef FlagRef(Flag);
-  IsInclude = FlagRef.startswith("-F") || FlagRef.startswith("-I");
+  IsInclude = FlagRef.starts_with("-F") || FlagRef.starts_with("-I");
   if (IsInclude)
     return !HaveCrashVFS;
-  if (FlagRef.startswith("-fmodules-cache-path="))
+  if (FlagRef.starts_with("-fmodules-cache-path="))
     return true;
 
   SkipNum = 0;
@@ -141,9 +141,7 @@ void Command::buildArgvForResponseFile(
     return;
   }
 
-  llvm::StringSet<> Inputs;
-  for (const auto *InputName : InputFileList)
-    Inputs.insert(InputName);
+  llvm::StringSet<> Inputs(llvm::from_range, InputFileList);
   Out.push_back(Executable);
 
   if (PrependArg)
@@ -184,9 +182,9 @@ rewriteIncludes(const llvm::ArrayRef<const char *> &Args, size_t Idx,
   SmallString<128> NewInc;
   if (NumArgs == 1) {
     StringRef FlagRef(Args[Idx + NumArgs - 1]);
-    assert((FlagRef.startswith("-F") || FlagRef.startswith("-I")) &&
-            "Expecting -I or -F");
-    StringRef Inc = FlagRef.slice(2, StringRef::npos);
+    assert((FlagRef.starts_with("-F") || FlagRef.starts_with("-I")) &&
+           "Expecting -I or -F");
+    StringRef Inc = FlagRef.substr(2);
     if (getAbsPath(Inc, NewInc)) {
       SmallString<128> NewArg(FlagRef.slice(0, 2));
       NewArg += NewInc;
@@ -342,7 +340,6 @@ int Command::Execute(ArrayRef<std::optional<StringRef>> Redirects,
     writeResponseFile(SS);
     buildArgvForResponseFile(Argv);
     Argv.push_back(nullptr);
-    SS.flush();
 
     // Save the response file in the appropriate encoding
     if (std::error_code EC = writeFileWithEncoding(
@@ -447,30 +444,6 @@ void CC1Command::setEnvironment(llvm::ArrayRef<const char *> NewEnvironment) {
   // We don't support set a new environment when calling into ExecuteCC1Tool()
   llvm_unreachable(
       "The CC1Command doesn't support changing the environment vars!");
-}
-
-ForceSuccessCommand::ForceSuccessCommand(
-    const Action &Source_, const Tool &Creator_,
-    ResponseFileSupport ResponseSupport, const char *Executable_,
-    const llvm::opt::ArgStringList &Arguments_, ArrayRef<InputInfo> Inputs,
-    ArrayRef<InputInfo> Outputs)
-    : Command(Source_, Creator_, ResponseSupport, Executable_, Arguments_,
-              Inputs, Outputs) {}
-
-void ForceSuccessCommand::Print(raw_ostream &OS, const char *Terminator,
-                            bool Quote, CrashReportInfo *CrashInfo) const {
-  Command::Print(OS, "", Quote, CrashInfo);
-  OS << " || (exit 0)" << Terminator;
-}
-
-int ForceSuccessCommand::Execute(ArrayRef<std::optional<StringRef>> Redirects,
-                                 std::string *ErrMsg,
-                                 bool *ExecutionFailed) const {
-  int Status = Command::Execute(Redirects, ErrMsg, ExecutionFailed);
-  (void)Status;
-  if (ExecutionFailed)
-    *ExecutionFailed = false;
-  return 0;
 }
 
 void JobList::Print(raw_ostream &OS, const char *Terminator, bool Quote,

@@ -61,6 +61,8 @@ protected:
 private:
   MemoryCache(const MemoryCache &) = delete;
   const MemoryCache &operator=(const MemoryCache &) = delete;
+
+  lldb::DataBufferSP GetL2CacheLine(lldb::addr_t addr, Status &error);
 };
 
     
@@ -123,6 +125,8 @@ public:
 
   bool DeallocateMemory(lldb::addr_t ptr);
 
+  bool IsInCache(lldb::addr_t addr) const;
+
 protected:
   typedef std::shared_ptr<AllocatedBlock> AllocatedBlockSP;
 
@@ -131,7 +135,7 @@ protected:
 
   // Classes that inherit from MemoryCache can see and modify these
   Process &m_process;
-  std::recursive_mutex m_mutex;
+  mutable std::recursive_mutex m_mutex;
   typedef std::multimap<uint32_t, AllocatedBlockSP> PermissionsToBlockMap;
   PermissionsToBlockMap m_memory_map;
 

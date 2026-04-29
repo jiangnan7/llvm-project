@@ -36,7 +36,7 @@ define {i8, i1} @test_uadd3(i8 %v) {
 
 define {i8, i1} @test_uadd3_poison(i8 %v) {
 ; CHECK-LABEL: @test_uadd3_poison(
-; CHECK-NEXT:    ret { i8, i1 } { i8 -1, i1 false }
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %result = call {i8, i1} @llvm.uadd.with.overflow.i8(i8 %v, i8 poison)
   ret {i8, i1} %result
@@ -52,7 +52,7 @@ define {i8, i1} @test_uadd4(i8 %v) {
 
 define {i8, i1} @test_uadd4_poison(i8 %v) {
 ; CHECK-LABEL: @test_uadd4_poison(
-; CHECK-NEXT:    ret { i8, i1 } { i8 -1, i1 false }
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %result = call {i8, i1} @llvm.uadd.with.overflow.i8(i8 poison, i8 %v)
   ret {i8, i1} %result
@@ -86,7 +86,7 @@ define {i8, i1} @test_sadd3(i8 %v) {
 
 define {i8, i1} @test_sadd3_poison(i8 %v) {
 ; CHECK-LABEL: @test_sadd3_poison(
-; CHECK-NEXT:    ret { i8, i1 } { i8 -1, i1 false }
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %result = call {i8, i1} @llvm.sadd.with.overflow.i8(i8 %v, i8 poison)
   ret {i8, i1} %result
@@ -102,7 +102,7 @@ define {i8, i1} @test_sadd4(i8 %v) {
 
 define {i8, i1} @test_sadd4_poison(i8 %v) {
 ; CHECK-LABEL: @test_sadd4_poison(
-; CHECK-NEXT:    ret { i8, i1 } { i8 -1, i1 false }
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %result = call {i8, i1} @llvm.sadd.with.overflow.i8(i8 poison, i8 %v)
   ret {i8, i1} %result
@@ -126,7 +126,7 @@ define {i8, i1} @test_usub2(i8 %V) {
 
 define {i8, i1} @test_usub2_poison(i8 %V) {
 ; CHECK-LABEL: @test_usub2_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.usub.with.overflow.i8(i8 %V, i8 poison)
   ret {i8, i1} %x
@@ -142,7 +142,7 @@ define {i8, i1} @test_usub3(i8 %V) {
 
 define {i8, i1} @test_usub3_poison(i8 %V) {
 ; CHECK-LABEL: @test_usub3_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.usub.with.overflow.i8(i8 poison, i8 %V)
   ret {i8, i1} %x
@@ -166,7 +166,7 @@ define {i8, i1} @test_ssub2(i8 %V) {
 
 define {i8, i1} @test_ssub2_poison(i8 %V) {
 ; CHECK-LABEL: @test_ssub2_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.ssub.with.overflow.i8(i8 %V, i8 poison)
   ret {i8, i1} %x
@@ -182,7 +182,7 @@ define {i8, i1} @test_ssub3(i8 %V) {
 
 define {i8, i1} @test_ssub3_poison(i8 %V) {
 ; CHECK-LABEL: @test_ssub3_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.ssub.with.overflow.i8(i8 poison, i8 %V)
   ret {i8, i1} %x
@@ -206,7 +206,7 @@ define {i8, i1} @test_umul2(i8 %V) {
 
 define {i8, i1} @test_umul2_poison(i8 %V) {
 ; CHECK-LABEL: @test_umul2_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.umul.with.overflow.i8(i8 %V, i8 poison)
   ret {i8, i1} %x
@@ -230,7 +230,7 @@ define {i8, i1} @test_umul4(i8 %V) {
 
 define {i8, i1} @test_umul4_poison(i8 %V) {
 ; CHECK-LABEL: @test_umul4_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.umul.with.overflow.i8(i8 poison, i8 %V)
   ret {i8, i1} %x
@@ -254,7 +254,7 @@ define {i8, i1} @test_smul2(i8 %V) {
 
 define {i8, i1} @test_smul2_poison(i8 %V) {
 ; CHECK-LABEL: @test_smul2_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.smul.with.overflow.i8(i8 %V, i8 poison)
   ret {i8, i1} %x
@@ -278,7 +278,7 @@ define {i8, i1} @test_smul4(i8 %V) {
 
 define {i8, i1} @test_smul4_poison(i8 %V) {
 ; CHECK-LABEL: @test_smul4_poison(
-; CHECK-NEXT:    ret { i8, i1 } zeroinitializer
+; CHECK-NEXT:    ret { i8, i1 } poison
 ;
   %x = call {i8, i1} @llvm.smul.with.overflow.i8(i8 poison, i8 %V)
   ret {i8, i1} %x
@@ -976,15 +976,15 @@ define <2 x i8> @fshr_zero_vec(<2 x i8> %shamt) {
 ; CHECK-LABEL: @fshr_zero_vec(
 ; CHECK-NEXT:    ret <2 x i8> zeroinitializer
 ;
-  %r = call <2 x i8> @llvm.fshr.v2i8(<2 x i8> zeroinitializer, <2 x i8> <i8 0, i8 undef>, <2 x i8> %shamt)
+  %r = call <2 x i8> @llvm.fshr.v2i8(<2 x i8> zeroinitializer, <2 x i8> <i8 0, i8 poison>, <2 x i8> %shamt)
   ret <2 x i8> %r
 }
 
 define <2 x i7> @fshl_ones_vec(<2 x i7> %shamt) {
 ; CHECK-LABEL: @fshl_ones_vec(
-; CHECK-NEXT:    ret <2 x i7> <i7 -1, i7 -1>
+; CHECK-NEXT:    ret <2 x i7> splat (i7 -1)
 ;
-  %r = call <2 x i7> @llvm.fshl.v2i7(<2 x i7> <i7 undef, i7 -1>, <2 x i7> <i7 -1, i7 undef>, <2 x i7> %shamt)
+  %r = call <2 x i7> @llvm.fshl.v2i7(<2 x i7> <i7 poison, i7 -1>, <2 x i7> <i7 -1, i7 poison>, <2 x i7> %shamt)
   ret <2 x i7> %r
 }
 
@@ -1379,7 +1379,7 @@ declare float @fmaxf(float, float)
 
 define float @nobuiltin_fmax() {
 ; CHECK-LABEL: @nobuiltin_fmax(
-; CHECK-NEXT:    [[M:%.*]] = call float @fmaxf(float 0.000000e+00, float 1.000000e+00) #[[ATTR4:[0-9]+]]
+; CHECK-NEXT:    [[M:%.*]] = call float @fmaxf(float 0.000000e+00, float 1.000000e+00) #[[ATTR3:[0-9]+]]
 ; CHECK-NEXT:    [[R:%.*]] = call float @llvm.fabs.f32(float [[M]])
 ; CHECK-NEXT:    ret float [[R]]
 ;
@@ -1392,6 +1392,8 @@ define float @nobuiltin_fmax() {
 declare i32 @llvm.ctpop.i32(i32)
 declare <3 x i33> @llvm.ctpop.v3i33(<3 x i33>)
 declare i1 @llvm.ctpop.i1(i1)
+declare i1 @llvm.ctlz.i1(i1, i1)
+declare i1 @llvm.cttz.i1(i1, i1)
 
 define i32 @ctpop_lowbit(i32 %x) {
 ; CHECK-LABEL: @ctpop_lowbit(
@@ -1419,7 +1421,7 @@ define i32 @ctpop_pow2(i32 %x) {
 
 define <3 x i33> @ctpop_signbit(<3 x i33> %x) {
 ; CHECK-LABEL: @ctpop_signbit(
-; CHECK-NEXT:    [[B:%.*]] = lshr <3 x i33> [[X:%.*]], <i33 32, i33 32, i33 32>
+; CHECK-NEXT:    [[B:%.*]] = lshr <3 x i33> [[X:%.*]], splat (i33 32)
 ; CHECK-NEXT:    ret <3 x i33> [[B]]
 ;
   %b = lshr <3 x i33> %x, <i33 32, i33 32, i33 32>
@@ -1431,7 +1433,7 @@ define <3 x i33> @ctpop_signbit(<3 x i33> %x) {
 
 define <3 x i33> @ctpop_notsignbit(<3 x i33> %x) {
 ; CHECK-LABEL: @ctpop_notsignbit(
-; CHECK-NEXT:    [[B:%.*]] = lshr <3 x i33> [[X:%.*]], <i33 31, i33 31, i33 31>
+; CHECK-NEXT:    [[B:%.*]] = lshr <3 x i33> [[X:%.*]], splat (i33 31)
 ; CHECK-NEXT:    [[R:%.*]] = tail call <3 x i33> @llvm.ctpop.v3i33(<3 x i33> [[B]])
 ; CHECK-NEXT:    ret <3 x i33> [[R]]
 ;
@@ -1464,7 +1466,7 @@ define <3 x i33> @cttz_shl1_vec(<3 x i33> %x) {
 ; CHECK-LABEL: @cttz_shl1_vec(
 ; CHECK-NEXT:    ret <3 x i33> [[X:%.*]]
 ;
-  %s = shl <3 x i33> <i33 1, i33 1, i33 undef>, %x
+  %s = shl <3 x i33> <i33 1, i33 1, i33 poison>, %x
   %r = call <3 x i33> @llvm.cttz.v3i33(<3 x i33> %s, i1 false)
   ret <3 x i33> %r
 }
@@ -1507,7 +1509,7 @@ define <3 x i33> @ctlz_lshr_sign_bit_vec(<3 x i33> %x) {
 ; CHECK-LABEL: @ctlz_lshr_sign_bit_vec(
 ; CHECK-NEXT:    ret <3 x i33> [[X:%.*]]
 ;
-  %s = lshr <3 x i33> <i33 undef, i33 4294967296, i33 4294967296>, %x
+  %s = lshr <3 x i33> <i33 poison, i33 4294967296, i33 4294967296>, %x
   %r = call <3 x i33> @llvm.ctlz.v3i33(<3 x i33> %s, i1 false)
   ret <3 x i33> %r
 }
@@ -1547,7 +1549,7 @@ define <3 x i33> @ctlz_ashr_sign_bit_vec(<3 x i33> %x) {
 ; CHECK-LABEL: @ctlz_ashr_sign_bit_vec(
 ; CHECK-NEXT:    ret <3 x i33> zeroinitializer
 ;
-  %s = ashr <3 x i33> <i33 4294967296, i33 undef, i33 4294967296>, %x
+  %s = ashr <3 x i33> <i33 4294967296, i33 poison, i33 4294967296>, %x
   %r = call <3 x i33> @llvm.ctlz.v3i33(<3 x i33> %s, i1 true)
   ret <3 x i33> %r
 }
@@ -1567,5 +1569,54 @@ define i1 @capture_vs_recurse(i64 %mask) {
   ret i1 %cmp
 }
 
+define i1 @ctlz_i1_non_poison_eq_false(i1 %x) {
+; CHECK-LABEL: @ctlz_i1_non_poison_eq_false(
+; CHECK-NEXT:    [[CT:%.*]] = call i1 @llvm.ctlz.i1(i1 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i1 [[CT]], false
+; CHECK-NEXT:    ret i1 [[CMP]]
+;
+  %ct = call i1 @llvm.ctlz.i1(i1 %x, i1 false)
+  %cmp = icmp eq i1 %ct, false
+  ret i1 %cmp
+}
+
+define i1 @ctlz_i1_poison_eq_false(i1 %x) {
+; CHECK-LABEL: @ctlz_i1_poison_eq_false(
+; CHECK-NEXT:    ret i1 true
+;
+  %ct = call i1 @llvm.ctlz.i1(i1 %x, i1 true)
+  %cmp = icmp eq i1 %ct, false
+  ret i1 %cmp
+}
+
+define i1 @cttz_i1_non_poison_eq_false(i1 %x) {
+; CHECK-LABEL: @cttz_i1_non_poison_eq_false(
+; CHECK-NEXT:    [[CT:%.*]] = call i1 @llvm.cttz.i1(i1 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i1 [[CT]], false
+; CHECK-NEXT:    ret i1 [[CMP]]
+;
+  %ct = call i1 @llvm.cttz.i1(i1 %x, i1 false)
+  %cmp = icmp eq i1 %ct, false
+  ret i1 %cmp
+}
+
+define i1 @cttz_i1_poison_eq_false(i1 %x) {
+; CHECK-LABEL: @cttz_i1_poison_eq_false(
+; CHECK-NEXT:    ret i1 true
+;
+  %ct = call i1 @llvm.cttz.i1(i1 %x, i1 true)
+  %cmp = icmp eq i1 %ct, false
+  ret i1 %cmp
+}
+
+define i1 @ctpop_i1_non_poison_eq_false(i1 %x) {
+; CHECK-LABEL: @ctpop_i1_non_poison_eq_false(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp eq i1 [[X:%.*]], false
+; CHECK-NEXT:    ret i1 [[CMP]]
+;
+  %ct = call i1 @llvm.ctpop.i1(i1 %x)
+  %cmp = icmp eq i1 %ct, false
+  ret i1 %cmp
+}
 
 attributes #0 = { nobuiltin readnone }

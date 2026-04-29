@@ -1,4 +1,4 @@
-! RUN: %python %S/test_errors.py %s %flang_fc1
+! RUN: %python %S/test_errors.py %s %flang_fc1 -pedantic
 module m
   abstract interface
     subroutine foo
@@ -21,6 +21,7 @@ module m
   procedure(h) :: i
   procedure(forward) :: j
   !ERROR: 'bad1' must be an abstract interface or a procedure with an explicit interface
+  !ERROR: Procedure 'k1' may not be an array without an explicit interface
   procedure(bad1) :: k1
   !ERROR: 'bad2' must be an abstract interface or a procedure with an explicit interface
   procedure(bad2) :: k2
@@ -37,7 +38,7 @@ module m
   type :: bad3
   end type
 
-  !PORTABILITY: Name 'm' declared in a module should not have the same name as the module
+  !PORTABILITY: Name 'm' declared in a module should not have the same name as the module [-Wbenign-name-clash]
   type :: m
   end type m
 
@@ -48,10 +49,14 @@ module m
   external :: a, b, c, d
   !ERROR: EXTERNAL attribute not allowed on 'm'
   external :: m
-  !WARNING: EXTERNAL attribute was already specified on 'foo'
+  !WARNING: EXTERNAL attribute was already specified on 'foo' [-Wredundant-attribute]
   external :: foo
   !ERROR: EXTERNAL attribute not allowed on 'bar'
   external :: bar
+
+  !ERROR: An entity may not have the ASYNCHRONOUS attribute unless it is a variable
+  asynchronous :: async
+  external :: async
 
   !ERROR: PARAMETER attribute not allowed on 'm'
   parameter(m=2)
@@ -76,7 +81,9 @@ module m
 contains
   subroutine bar
   end subroutine
+  !ERROR: An entity may not have the ASYNCHRONOUS attribute unless it is a variable
   subroutine test
+    asynchronous test
     !ERROR: Abstract procedure interface 'foo2' may not be referenced
     call foo2()
     !ERROR: Abstract procedure interface 'f' may not be referenced

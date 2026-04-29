@@ -123,7 +123,7 @@ struct CodeTemplate {
   CodeTemplate clone() const;
 
   ExecutionMode Execution = ExecutionMode::UNKNOWN;
-  // See InstructionBenchmarkKey.::Config.
+  // See BenchmarkKey.::Config.
   std::string Config;
   // Some information about how this template has been created.
   std::string Info;
@@ -131,7 +131,7 @@ struct CodeTemplate {
   std::vector<InstructionTemplate> Instructions;
   // If the template uses the provided scratch memory, the register in which
   // the pointer to this memory is passed in to the function.
-  unsigned ScratchSpacePointerInReg = 0;
+  MCRegister ScratchSpacePointerInReg;
 
 #if defined(__GNUC__) && (defined(__clang__) || LLVM_GNUC_PREREQ(8, 0, 0))
   // FIXME: GCC7 bug workaround. Drop #if after GCC7 no longer supported.

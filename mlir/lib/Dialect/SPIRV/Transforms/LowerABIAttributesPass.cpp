@@ -22,7 +22,6 @@
 #include "mlir/Dialect/SPIRV/Utils/LayoutUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Transforms/DialectConversion.h"
-#include "llvm/ADT/SetVector.h"
 
 namespace mlir {
 namespace spirv {
@@ -51,19 +50,19 @@ createGlobalVarForEntryPointArgument(OpBuilder &builder, spirv::FuncOp funcOp,
   // info create a variable of type !spirv.ptr<!spirv.struct<elementType>>. If
   // not it must already be a !spirv.ptr<!spirv.struct<...>>.
   auto varType = funcOp.getFunctionType().getInput(argIndex);
-  if (varType.cast<spirv::SPIRVType>().isScalarOrVector()) {
+  if (cast<spirv::SPIRVType>(varType).isScalarOrVector()) {
     auto storageClass = abiInfo.getStorageClass();
     if (!storageClass)
       return nullptr;
     varType =
         spirv::PointerType::get(spirv::StructType::get(varType), *storageClass);
   }
-  auto varPtrType = varType.cast<spirv::PointerType>();
-  auto varPointeeType = varPtrType.getPointeeType().cast<spirv::StructType>();
+  auto varPtrType = cast<spirv::PointerType>(varType);
+  auto varPointeeType = cast<spirv::StructType>(varPtrType.getPointeeType());
 
   // Set the offset information.
   varPointeeType =
-      VulkanLayoutUtils::decorateType(varPointeeType).cast<spirv::StructType>();
+      cast<spirv::StructType>(VulkanLayoutUtils::decorateType(varPointeeType));
 
   if (!varPointeeType)
     return nullptr;
@@ -85,6 +84,9 @@ getInterfaceVariables(spirv::FuncOp funcOp,
   if (!module) {
     return failure();
   }
+  spirv::TargetEnvAttr targetEnvAttr = spirv::lookupTargetEnv(funcOp);
+  spirv::TargetEnv targetEnv(targetEnvAttr);
+
   SetVector<Operation *> interfaceVarSet;
 
   // TODO: This should in reality traverse the entry function
@@ -93,18 +95,18 @@ getInterfaceVariables(spirv::FuncOp funcOp,
   funcOp.walk([&](spirv::AddressOfOp addressOfOp) {
     auto var =
         module.lookupSymbol<spirv::GlobalVariableOp>(addressOfOp.getVariable());
-    // TODO: Per SPIR-V spec: "Before version 1.4, the interface’s
+    // Per SPIR-V spec: "Before version 1.4, the interface's
     // storage classes are limited to the Input and Output storage classes.
-    // Starting with version 1.4, the interface’s storage classes are all
+    // Starting with version 1.4, the interface's storage classes are all
     // storage classes used in declaring all global variables referenced by the
-    // entry point’s call tree." We should consider the target environment here.
-    switch (var.getType().cast<spirv::PointerType>().getStorageClass()) {
-    case spirv::StorageClass::Input:
-    case spirv::StorageClass::Output:
+    // entry point’s call tree."
+    const spirv::StorageClass storageClass =
+        cast<spirv::PointerType>(var.getType()).getStorageClass();
+    if ((targetEnvAttr && targetEnv.getVersion() >= spirv::Version::V_1_4) ||
+        (llvm::is_contained(
+            {spirv::StorageClass::Input, spirv::StorageClass::Output},
+            storageClass))) {
       interfaceVarSet.insert(var.getOperation());
-      break;
-    default:
-      break;
     }
   });
   for (auto &var : interfaceVarSet) {
@@ -124,6 +126,9 @@ static LogicalResult lowerEntryPointABIAttr(spirv::FuncOp funcOp,
     return failure();
   }
 
+  spirv::TargetEnvAttr targetEnvAttr = spirv::lookupTargetEnv(funcOp);
+  spirv::TargetEnv targetEnv(targetEnvAttr);
+
   OpBuilder::InsertionGuard moduleInsertionGuard(builder);
   auto spirvModule = funcOp->getParentOfType<spirv::ModuleOp>();
   builder.setInsertionPointToEnd(spirvModule.getBody());
@@ -135,8 +140,6 @@ static LogicalResult lowerEntryPointABIAttr(spirv::FuncOp funcOp,
     return failure();
   }
 
-  spirv::TargetEnvAttr targetEnvAttr = spirv::lookupTargetEnv(funcOp);
-  spirv::TargetEnv targetEnv(targetEnvAttr);
   FailureOr<spirv::ExecutionModel> executionModel =
       spirv::getExecutionModel(targetEnvAttr);
   if (failed(executionModel))
@@ -157,7 +160,7 @@ static LogicalResult lowerEntryPointABIAttr(spirv::FuncOp funcOp,
       // Erase workgroup size.
       entryPointAttr = spirv::EntryPointABIAttr::get(
           entryPointAttr.getContext(), DenseI32ArrayAttr(),
-          entryPointAttr.getSubgroupSize());
+          entryPointAttr.getSubgroupSize(), entryPointAttr.getTargetWidth());
     }
   }
   if (std::optional<int> subgroupSize = entryPointAttr.getSubgroupSize()) {
@@ -170,10 +173,24 @@ static LogicalResult lowerEntryPointABIAttr(spirv::FuncOp funcOp,
       // Erase subgroup size.
       entryPointAttr = spirv::EntryPointABIAttr::get(
           entryPointAttr.getContext(), entryPointAttr.getWorkgroupSize(),
-          std::nullopt);
+          std::nullopt, entryPointAttr.getTargetWidth());
     }
   }
-  if (entryPointAttr.getWorkgroupSize() || entryPointAttr.getSubgroupSize())
+  if (std::optional<int> targetWidth = entryPointAttr.getTargetWidth()) {
+    std::optional<ArrayRef<spirv::Capability>> caps =
+        spirv::getCapabilities(spirv::ExecutionMode::SignedZeroInfNanPreserve);
+    if (!caps || targetEnv.allows(*caps)) {
+      builder.create<spirv::ExecutionModeOp>(
+          funcOp.getLoc(), funcOp,
+          spirv::ExecutionMode::SignedZeroInfNanPreserve, *targetWidth);
+      // Erase target width.
+      entryPointAttr = spirv::EntryPointABIAttr::get(
+          entryPointAttr.getContext(), entryPointAttr.getWorkgroupSize(),
+          entryPointAttr.getSubgroupSize(), std::nullopt);
+    }
+  }
+  if (entryPointAttr.getWorkgroupSize() || entryPointAttr.getSubgroupSize() ||
+      entryPointAttr.getTargetWidth())
     funcOp->setAttr(entryPointAttrName, entryPointAttr);
   else
     funcOp->removeAttr(entryPointAttrName);
@@ -220,6 +237,10 @@ LogicalResult ProcessInterfaceVarABI::matchAndRewrite(
   auto indexType = typeConverter.getIndexType();
 
   auto attrName = spirv::getInterfaceVarABIAttrName();
+
+  OpBuilder::InsertionGuard funcInsertionGuard(rewriter);
+  rewriter.setInsertionPointToStart(&funcOp.front());
+
   for (const auto &argType :
        llvm::enumerate(funcOp.getFunctionType().getInputs())) {
     auto abiInfo = funcOp.getArgAttrOfType<spirv::InterfaceVarABIAttr>(
@@ -236,8 +257,6 @@ LogicalResult ProcessInterfaceVarABI::matchAndRewrite(
     if (!var)
       return failure();
 
-    OpBuilder::InsertionGuard funcInsertionGuard(rewriter);
-    rewriter.setInsertionPointToStart(&funcOp.front());
     // Insert spirv::AddressOf and spirv::AccessChain operations.
     Value replacement =
         rewriter.create<spirv::AddressOfOp>(funcOp.getLoc(), var);
@@ -247,7 +266,7 @@ LogicalResult ProcessInterfaceVarABI::matchAndRewrite(
     // at the start of the function. It is probably better to do the load just
     // before the use. There might be multiple loads and currently there is no
     // easy way to replace all uses with a sequence of operations.
-    if (argType.value().cast<spirv::SPIRVType>().isScalarOrVector()) {
+    if (cast<spirv::SPIRVType>(argType.value()).isScalarOrVector()) {
       auto zero =
           spirv::ConstantOp::getZero(indexType, funcOp.getLoc(), rewriter);
       auto loadPtr = rewriter.create<spirv::AccessChainOp>(
@@ -261,9 +280,9 @@ LogicalResult ProcessInterfaceVarABI::matchAndRewrite(
     return failure();
 
   // Creates a new function with the update signature.
-  rewriter.updateRootInPlace(funcOp, [&] {
-    funcOp.setType(rewriter.getFunctionType(
-        signatureConverter.getConvertedTypes(), std::nullopt));
+  rewriter.modifyOpInPlace(funcOp, [&] {
+    funcOp.setType(
+        rewriter.getFunctionType(signatureConverter.getConvertedTypes(), {}));
   });
   return success();
 }
@@ -287,7 +306,7 @@ void LowerABIAttributesPass::runOnOperation() {
   typeConverter.addSourceMaterialization([](OpBuilder &builder,
                                             spirv::PointerType type,
                                             ValueRange inputs, Location loc) {
-    if (inputs.size() != 1 || !inputs[0].getType().isa<spirv::PointerType>())
+    if (inputs.size() != 1 || !isa<spirv::PointerType>(inputs[0].getType()))
       return Value();
     return builder.create<spirv::BitcastOp>(loc, type, inputs[0]).getResult();
   });

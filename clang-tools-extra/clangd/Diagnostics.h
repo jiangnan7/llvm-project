@@ -83,6 +83,10 @@ struct Fix {
   std::string Message;
   /// TextEdits from clang's fix-its. Must be non-empty.
   llvm::SmallVector<TextEdit, 1> Edits;
+
+  /// Annotations for the Edits.
+  llvm::SmallVector<std::pair<ChangeAnnotationIdentifier, ChangeAnnotation>>
+      Annotations;
 };
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const Fix &F);
 
@@ -119,9 +123,6 @@ Diag toDiag(const llvm::SMDiagnostic &, Diag::DiagSource Source);
 void toLSPDiags(
     const Diag &D, const URIForFile &File, const ClangdDiagnosticOptions &Opts,
     llvm::function_ref<void(clangd::Diagnostic, llvm::ArrayRef<Fix>)> OutFn);
-
-/// Convert from Fix to LSP CodeAction.
-CodeAction toCodeAction(const Fix &D, const URIForFile &File);
 
 /// Convert from clang diagnostic level to LSP severity.
 int getSeverity(DiagnosticsEngine::Level L);
@@ -180,11 +181,11 @@ private:
 };
 
 /// Determine whether a (non-clang-tidy) diagnostic is suppressed by config.
-bool isBuiltinDiagnosticSuppressed(unsigned ID,
-                                   const llvm::StringSet<> &Suppressed,
-                                   const LangOptions &);
+bool isDiagnosticSuppressed(const clang::Diagnostic &Diag,
+                            const llvm::StringSet<> &Suppressed,
+                            const LangOptions &);
 /// Take a user-specified diagnostic code, and convert it to a normalized form
-/// stored in the config and consumed by isBuiltinDiagnosticsSuppressed.
+/// stored in the config and consumed by isDiagnosticsSuppressed.
 ///
 /// (This strips err_ and -W prefix so we can match with or without them.)
 llvm::StringRef normalizeSuppressedCode(llvm::StringRef);

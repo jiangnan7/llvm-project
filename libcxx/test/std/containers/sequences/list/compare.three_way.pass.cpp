@@ -11,7 +11,7 @@
 
 // template <class T, class Allocator> constexpr
 //   synth-three-way-result<T>
-//     operator<=>(const list<T, Allocator>& x, const list<T, Allocator>& y);
+//     operator<=>(const list<T, Allocator>& x, const list<T, Allocator>& y); // constexpr since C++26
 
 #include <list>
 #include <cassert>
@@ -19,7 +19,9 @@
 #include "test_container_comparisons.h"
 
 int main(int, char**) {
-  assert(test_ordered_container_spaceship<std::list>());
-  // `std::list` is not constexpr, so no `static_assert` test here.
+  assert(test_sequence_container_spaceship<std::list>());
+#if TEST_STD_VER >= 26
+  static_assert(test_sequence_container_spaceship<std::list>());
+#endif
   return 0;
 }

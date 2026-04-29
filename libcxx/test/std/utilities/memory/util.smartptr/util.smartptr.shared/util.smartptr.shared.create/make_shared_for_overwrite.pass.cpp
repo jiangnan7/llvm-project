@@ -40,26 +40,29 @@ static_assert(!HasMakeSharedForOverwrite<Foo, Foo>);
 
 // bounded array
 static_assert(HasMakeSharedForOverwrite<int[2]>);
-static_assert(!HasMakeSharedForOverwrite<int[2], size_t>);
+static_assert(!HasMakeSharedForOverwrite<int[2], std::size_t>);
 static_assert(!HasMakeSharedForOverwrite<int[2], int>);
 static_assert(!HasMakeSharedForOverwrite<int[2], int, int>);
 static_assert(HasMakeSharedForOverwrite<Foo[2]>);
-static_assert(!HasMakeSharedForOverwrite<Foo[2], size_t>);
+static_assert(!HasMakeSharedForOverwrite<Foo[2], std::size_t>);
 static_assert(!HasMakeSharedForOverwrite<Foo[2], int>);
 static_assert(!HasMakeSharedForOverwrite<Foo[2], int, int>);
 
 // unbounded array
-static_assert(HasMakeSharedForOverwrite<int[], size_t>);
-static_assert(HasMakeSharedForOverwrite<Foo[], size_t>);
+static_assert(HasMakeSharedForOverwrite<int[], std::size_t>);
+static_assert(HasMakeSharedForOverwrite<Foo[], std::size_t>);
 static_assert(!HasMakeSharedForOverwrite<int[]>);
 static_assert(!HasMakeSharedForOverwrite<Foo[]>);
-static_assert(!HasMakeSharedForOverwrite<int[], size_t, int>);
-static_assert(!HasMakeSharedForOverwrite<Foo[], size_t, int>);
+static_assert(!HasMakeSharedForOverwrite<int[], std::size_t, int>);
+static_assert(!HasMakeSharedForOverwrite<Foo[], std::size_t, int>);
 
-constexpr char pattern = 0xDE;
+constexpr char pattern = static_cast<char>(0xDE);
 
 void* operator new(std::size_t count) {
   void* ptr = std::malloc(count);
+  if (!ptr) {
+    std::abort(); // placate MSVC's unchecked malloc warning (assert() won't silence it)
+  }
   for (std::size_t i = 0; i < count; ++i) {
     *(reinterpret_cast<char*>(ptr) + i) = pattern;
   }

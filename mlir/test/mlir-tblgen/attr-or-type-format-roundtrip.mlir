@@ -5,10 +5,10 @@
 // CHECK: !test.type_with_format<2147, three = "hi", two = "hi">
 func.func private @test_roundtrip_parameter_parsers(!test.type_with_format<111, three = #test<attr_ugly begin 5 : index end>, two = "foo">) -> !test.type_with_format<2147, two = "hi", three = "hi">
 attributes {
-  // CHECK: #test.attr_with_format<3 : two = "hello", four = [1, 2, 3] : 42 : i64 : 0, [ 10 : i16]
-  attr0 = #test.attr_with_format<3 : two = "hello", four = [1, 2, 3] : 42 : i64 : 0, [10 : i16]>,
-  // CHECK: #test.attr_with_format<5 : two = "a_string", four = [4, 5, 6, 7, 8] : 8 : i8 : 255, [ 10 : i16]>,
-  attr1 = #test.attr_with_format<5 : two = "a_string", four = [4, 5, 6, 7, 8] : 8 : i8 : 255, [10 : i16]>,
+  // CHECK: #test.attr_with_format<3 : two = "hello", four = [1, 2, 3] : 42 : i64 : 0 : [4, 5, 6], [ 10 : i16]
+  attr0 = #test.attr_with_format<3 : two = "hello", four = [1, 2, 3] : 42 : i64 : 0 : [4, 5, 6], [10 : i16]>,
+  // CHECK: #test.attr_with_format<5 : two = "a_string", four = [4, 5, 6, 7, 8] : 8 : i8 : 255 : [9, 10, 11], [ 10 : i16]>,
+  attr1 = #test.attr_with_format<5 : two = "a_string", four = [4, 5, 6, 7, 8] : 8 : i8 : 255 : [9, 10, 11], [10 : i16]>,
   // CHECK: #test<attr_ugly begin 5 : index end>
   attr2 = #test<attr_ugly begin 5 : index end>,
   // CHECK: #test.attr_params<42, 24>
@@ -23,10 +23,16 @@ attributes {
   attr7 = #test.custom_anchor<5>,
   // CHECK: #test.custom_anchor<5, true>
   attr8 = #test.custom_anchor<5, true>,
-  // CHECK: #test.attr_with_optional_signed<-12>
-  attr9 = #test.attr_with_optional_signed<-12>,
-  // CHECK: #test.attr_with_optional_unsigned<22>
-  attr_10 = #test.attr_with_optional_unsigned<22>
+  // CHECK: #test.attr_with_optional_signed<-9223372036854775808>
+  attr9 = #test.attr_with_optional_signed<-9223372036854775808>,
+  // CHECK: #test.attr_with_optional_unsigned<18446744073709551615>
+  attr_10 = #test.attr_with_optional_unsigned<18446744073709551615>,
+  // CHECK: #test.attr_with_optional_enum<>
+  attr_11 = #test.attr_with_optional_enum<>,
+  // CHECK: #test.attr_with_optional_enum<a>
+  attr_12 = #test.attr_with_optional_enum<a>,
+  // CHECK: #test.attr_with_optional_enum<b>
+  attr_13 = #test.attr_with_optional_enum<b>
 }
 
 // CHECK-LABEL: @test_roundtrip_default_parsers_struct
@@ -67,6 +73,10 @@ attributes {
 // CHECK: !test.custom_type_spacing<1 2>
 // CHECK: !test.custom_type_string<"foo" foo>
 // CHECK: !test.custom_type_string<"bar" bar>
+// CHECK: !test.optional_type_string
+// CHECK: !test.optional_type_string
+// CHECK: !test.optional_type_string<"non default">
+// CHECK: !test.optional_type_string<"containing\0A \22escape\22 characters\0F">
 
 func.func private @test_roundtrip_default_parsers_struct(
   !test.no_parser<255, [1, 2, 3, 4, 5], "foobar", 4>
@@ -105,5 +115,9 @@ func.func private @test_roundtrip_default_parsers_struct(
   !test.custom_type<2 9 9 5>,
   !test.custom_type_spacing<1 2>,
   !test.custom_type_string<"foo" foo>,
-  !test.custom_type_string<"bar" bar>
+  !test.custom_type_string<"bar" bar>,
+  !test.optional_type_string,
+  !test.optional_type_string<"default">,
+  !test.optional_type_string<"non default">,
+  !test.optional_type_string<"containing\n \"escape\" characters\0f">
 )

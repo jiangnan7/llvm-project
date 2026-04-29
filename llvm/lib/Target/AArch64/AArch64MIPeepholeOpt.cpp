@@ -46,6 +46,27 @@
 //    source, we use the INSvi[X]lane to replace the COPY & INSvi[X]gpr
 //    instructions.
 //
+// 7. If MI sets zero for high 64-bits implicitly, remove `mov 0` for high
+//    64-bits. For example,
+//
+//   %1:fpr64 = nofpexcept FCVTNv4i16 %0:fpr128, implicit $fpcr
+//   %2:fpr64 = MOVID 0
+//   %4:fpr128 = IMPLICIT_DEF
+//   %3:fpr128 = INSERT_SUBREG %4:fpr128(tied-def 0), %2:fpr64, %subreg.dsub
+//   %6:fpr128 = IMPLICIT_DEF
+//   %5:fpr128 = INSERT_SUBREG %6:fpr128(tied-def 0), %1:fpr64, %subreg.dsub
+//   %7:fpr128 = INSvi64lane %5:fpr128(tied-def 0), 1, %3:fpr128, 0
+//   ==>
+//   %1:fpr64 = nofpexcept FCVTNv4i16 %0:fpr128, implicit $fpcr
+//   %6:fpr128 = IMPLICIT_DEF
+//   %7:fpr128 = INSERT_SUBREG %6:fpr128(tied-def 0), %1:fpr64, %subreg.dsub
+//
+// 8. Remove redundant CSELs that select between identical registers, by
+//    replacing them with unconditional moves.
+//
+// 9. Replace UBFMXri with UBFMWri if the instruction is equivalent to a 32 bit
+//    LSR or LSL alias of UBFM.
+//
 //===----------------------------------------------------------------------===//
 
 #include "AArch64ExpandImm.h"
@@ -63,9 +84,7 @@ namespace {
 struct AArch64MIPeepholeOpt : public MachineFunctionPass {
   static char ID;
 
-  AArch64MIPeepholeOpt() : MachineFunctionPass(ID) {
-    initializeAArch64MIPeepholeOptPass(*PassRegistry::getPassRegistry());
-  }
+  AArch64MIPeepholeOpt() : MachineFunctionPass(ID) {}
 
   const AArch64InstrInfo *TII;
   const AArch64RegisterInfo *TRI;
@@ -109,8 +128,13 @@ struct AArch64MIPeepholeOpt : public MachineFunctionPass {
   template <typename T>
   bool visitAND(unsigned Opc, MachineInstr &MI);
   bool visitORR(MachineInstr &MI);
+  bool visitCSEL(MachineInstr &MI);
   bool visitINSERT(MachineInstr &MI);
   bool visitINSviGPR(MachineInstr &MI, unsigned Opc);
+  bool visitINSvi64lane(MachineInstr &MI);
+  bool visitFMOVDr(MachineInstr &MI);
+  bool visitUBFMXri(MachineInstr &MI);
+  bool visitCopy(MachineInstr &MI);
   bool runOnMachineFunction(MachineFunction &MF) override;
 
   StringRef getPassName() const override {
@@ -119,7 +143,7 @@ struct AArch64MIPeepholeOpt : public MachineFunctionPass {
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.setPreservesCFG();
-    AU.addRequired<MachineLoopInfo>();
+    AU.addRequired<MachineLoopInfoWrapperPass>();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
 };
@@ -179,7 +203,7 @@ bool AArch64MIPeepholeOpt::visitAND(
   //
   // The mov pseudo instruction could be expanded to multiple mov instructions
   // later. Let's try to split the constant operand of mov instruction into two
-  // bitmask immediates. It makes only two AND instructions intead of multiple
+  // bitmask immediates. It makes only two AND instructions instead of multiple
   // mov + and instructions.
 
   return splitTwoPartImm<T>(
@@ -237,15 +261,18 @@ bool AArch64MIPeepholeOpt::visitORR(MachineInstr &MI) {
     // A COPY from an FPR will become a FMOVSWr, so do so now so that we know
     // that the upper bits are zero.
     if (RC != &AArch64::FPR32RegClass &&
-        ((RC != &AArch64::FPR64RegClass && RC != &AArch64::FPR128RegClass) ||
+        ((RC != &AArch64::FPR64RegClass && RC != &AArch64::FPR128RegClass &&
+          RC != &AArch64::ZPRRegClass) ||
          SrcMI->getOperand(1).getSubReg() != AArch64::ssub))
       return false;
-    Register CpySrc = SrcMI->getOperand(1).getReg();
+    Register CpySrc;
     if (SrcMI->getOperand(1).getSubReg() == AArch64::ssub) {
       CpySrc = MRI->createVirtualRegister(&AArch64::FPR32RegClass);
       BuildMI(*SrcMI->getParent(), SrcMI, SrcMI->getDebugLoc(),
               TII->get(TargetOpcode::COPY), CpySrc)
           .add(SrcMI->getOperand(1));
+    } else {
+      CpySrc = SrcMI->getOperand(1).getReg();
     }
     BuildMI(*SrcMI->getParent(), SrcMI, SrcMI->getDebugLoc(),
             TII->get(AArch64::FMOVSWr), SrcMI->getOperand(0).getReg())
@@ -262,6 +289,26 @@ bool AArch64MIPeepholeOpt::visitORR(MachineInstr &MI) {
   LLVM_DEBUG(dbgs() << "Removed: " << MI << "\n");
   MI.eraseFromParent();
 
+  return true;
+}
+
+bool AArch64MIPeepholeOpt::visitCSEL(MachineInstr &MI) {
+  // Replace CSEL with MOV when both inputs are the same register.
+  if (MI.getOperand(1).getReg() != MI.getOperand(2).getReg())
+    return false;
+
+  auto ZeroReg =
+      MI.getOpcode() == AArch64::CSELXr ? AArch64::XZR : AArch64::WZR;
+  auto OrOpcode =
+      MI.getOpcode() == AArch64::CSELXr ? AArch64::ORRXrs : AArch64::ORRWrs;
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(OrOpcode))
+      .addReg(MI.getOperand(0).getReg(), RegState::Define)
+      .addReg(ZeroReg)
+      .addReg(MI.getOperand(1).getReg())
+      .addImm(0);
+
+  MI.eraseFromParent();
   return true;
 }
 
@@ -343,7 +390,7 @@ bool AArch64MIPeepholeOpt::visitADDSUB(
   //
   // The mov pseudo instruction could be expanded to multiple mov instructions
   // later. Let's try to split the constant operand of mov instruction into two
-  // legal add/sub immediates. It makes only two ADD/SUB instructions intead of
+  // legal add/sub immediates. It makes only two ADD/SUB instructions instead of
   // multiple `mov` + `and/sub` instructions.
 
   // We can sometimes have ADDWrr WZR, MULi32imm that have not been constant
@@ -592,6 +639,203 @@ bool AArch64MIPeepholeOpt::visitINSviGPR(MachineInstr &MI, unsigned Opc) {
   return true;
 }
 
+// All instructions that set a FPR64 will implicitly zero the top bits of the
+// register.
+static bool is64bitDefwithZeroHigh64bit(MachineInstr *MI,
+                                        MachineRegisterInfo *MRI) {
+  if (!MI->getOperand(0).isReg() || !MI->getOperand(0).isDef())
+    return false;
+  const TargetRegisterClass *RC = MRI->getRegClass(MI->getOperand(0).getReg());
+  if (RC != &AArch64::FPR64RegClass)
+    return false;
+  return MI->getOpcode() > TargetOpcode::GENERIC_OP_END;
+}
+
+bool AArch64MIPeepholeOpt::visitINSvi64lane(MachineInstr &MI) {
+  // Check the MI for low 64-bits sets zero for high 64-bits implicitly.
+  // We are expecting below case.
+  //
+  //  %1:fpr64 = nofpexcept FCVTNv4i16 %0:fpr128, implicit $fpcr
+  //  %6:fpr128 = IMPLICIT_DEF
+  //  %5:fpr128 = INSERT_SUBREG %6:fpr128(tied-def 0), killed %1:fpr64, %subreg.dsub
+  //  %7:fpr128 = INSvi64lane %5:fpr128(tied-def 0), 1, killed %3:fpr128, 0
+  MachineInstr *Low64MI = MRI->getUniqueVRegDef(MI.getOperand(1).getReg());
+  if (Low64MI->getOpcode() != AArch64::INSERT_SUBREG)
+    return false;
+  Low64MI = MRI->getUniqueVRegDef(Low64MI->getOperand(2).getReg());
+  if (!Low64MI || !is64bitDefwithZeroHigh64bit(Low64MI, MRI))
+    return false;
+
+  // Check there is `mov 0` MI for high 64-bits.
+  // We are expecting below cases.
+  //
+  //  %2:fpr64 = MOVID 0
+  //  %4:fpr128 = IMPLICIT_DEF
+  //  %3:fpr128 = INSERT_SUBREG %4:fpr128(tied-def 0), killed %2:fpr64, %subreg.dsub
+  //  %7:fpr128 = INSvi64lane %5:fpr128(tied-def 0), 1, killed %3:fpr128, 0
+  // or
+  //  %5:fpr128 = MOVIv2d_ns 0
+  //  %6:fpr64 = COPY %5.dsub:fpr128
+  //  %8:fpr128 = IMPLICIT_DEF
+  //  %7:fpr128 = INSERT_SUBREG %8:fpr128(tied-def 0), killed %6:fpr64, %subreg.dsub
+  //  %11:fpr128 = INSvi64lane %9:fpr128(tied-def 0), 1, killed %7:fpr128, 0
+  MachineInstr *High64MI = MRI->getUniqueVRegDef(MI.getOperand(3).getReg());
+  if (!High64MI || High64MI->getOpcode() != AArch64::INSERT_SUBREG)
+    return false;
+  High64MI = MRI->getUniqueVRegDef(High64MI->getOperand(2).getReg());
+  if (High64MI && High64MI->getOpcode() == TargetOpcode::COPY)
+    High64MI = MRI->getUniqueVRegDef(High64MI->getOperand(1).getReg());
+  if (!High64MI || (High64MI->getOpcode() != AArch64::MOVID &&
+                    High64MI->getOpcode() != AArch64::MOVIv2d_ns))
+    return false;
+  if (High64MI->getOperand(1).getImm() != 0)
+    return false;
+
+  // Let's remove MIs for high 64-bits.
+  Register OldDef = MI.getOperand(0).getReg();
+  Register NewDef = MI.getOperand(1).getReg();
+  MRI->constrainRegClass(NewDef, MRI->getRegClass(OldDef));
+  MRI->replaceRegWith(OldDef, NewDef);
+  MI.eraseFromParent();
+
+  return true;
+}
+
+bool AArch64MIPeepholeOpt::visitFMOVDr(MachineInstr &MI) {
+  // An FMOVDr sets the high 64-bits to zero implicitly, similar to ORR for GPR.
+  MachineInstr *Low64MI = MRI->getUniqueVRegDef(MI.getOperand(1).getReg());
+  if (!Low64MI || !is64bitDefwithZeroHigh64bit(Low64MI, MRI))
+    return false;
+
+  // Let's remove MIs for high 64-bits.
+  Register OldDef = MI.getOperand(0).getReg();
+  Register NewDef = MI.getOperand(1).getReg();
+  LLVM_DEBUG(dbgs() << "Removing: " << MI << "\n");
+  MRI->clearKillFlags(OldDef);
+  MRI->clearKillFlags(NewDef);
+  MRI->constrainRegClass(NewDef, MRI->getRegClass(OldDef));
+  MRI->replaceRegWith(OldDef, NewDef);
+  MI.eraseFromParent();
+
+  return true;
+}
+
+bool AArch64MIPeepholeOpt::visitUBFMXri(MachineInstr &MI) {
+  // Check if the instruction is equivalent to a 32 bit LSR or LSL alias of
+  // UBFM, and replace the UBFMXri instruction with its 32 bit variant, UBFMWri.
+  int64_t Immr = MI.getOperand(2).getImm();
+  int64_t Imms = MI.getOperand(3).getImm();
+
+  bool IsLSR = Imms == 31 && Immr <= Imms;
+  bool IsLSL = Immr == Imms + 33;
+  if (!IsLSR && !IsLSL)
+    return false;
+
+  if (IsLSL) {
+    Immr -= 32;
+  }
+
+  const TargetRegisterClass *DstRC64 =
+      TII->getRegClass(TII->get(MI.getOpcode()), 0, TRI, *MI.getMF());
+  const TargetRegisterClass *DstRC32 =
+      TRI->getSubRegisterClass(DstRC64, AArch64::sub_32);
+  assert(DstRC32 && "Destination register class of UBFMXri doesn't have a "
+                    "sub_32 subregister class");
+
+  const TargetRegisterClass *SrcRC64 =
+      TII->getRegClass(TII->get(MI.getOpcode()), 1, TRI, *MI.getMF());
+  const TargetRegisterClass *SrcRC32 =
+      TRI->getSubRegisterClass(SrcRC64, AArch64::sub_32);
+  assert(SrcRC32 && "Source register class of UBFMXri doesn't have a sub_32 "
+                    "subregister class");
+
+  Register DstReg64 = MI.getOperand(0).getReg();
+  Register DstReg32 = MRI->createVirtualRegister(DstRC32);
+  Register SrcReg64 = MI.getOperand(1).getReg();
+  Register SrcReg32 = MRI->createVirtualRegister(SrcRC32);
+
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(AArch64::COPY),
+          SrcReg32)
+      .addReg(SrcReg64, 0, AArch64::sub_32);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(), TII->get(AArch64::UBFMWri),
+          DstReg32)
+      .addReg(SrcReg32)
+      .addImm(Immr)
+      .addImm(Imms);
+  BuildMI(*MI.getParent(), MI, MI.getDebugLoc(),
+          TII->get(AArch64::SUBREG_TO_REG), DstReg64)
+      .addImm(0)
+      .addReg(DstReg32)
+      .addImm(AArch64::sub_32);
+  MI.eraseFromParent();
+  return true;
+}
+
+// Across a basic-block we might have in i32 extract from a value that only
+// operates on upper bits (for example a sxtw). We can replace the COPY with a
+// new version skipping the sxtw.
+bool AArch64MIPeepholeOpt::visitCopy(MachineInstr &MI) {
+  Register InputReg = MI.getOperand(1).getReg();
+  if (MI.getOperand(1).getSubReg() != AArch64::sub_32 ||
+      !MRI->hasOneNonDBGUse(InputReg))
+    return false;
+
+  MachineInstr *SrcMI = MRI->getUniqueVRegDef(InputReg);
+  SmallPtrSet<MachineInstr *, 4> DeadInstrs;
+  DeadInstrs.insert(SrcMI);
+  while (SrcMI && SrcMI->isFullCopy() &&
+         MRI->hasOneNonDBGUse(SrcMI->getOperand(1).getReg())) {
+    SrcMI = MRI->getUniqueVRegDef(SrcMI->getOperand(1).getReg());
+    DeadInstrs.insert(SrcMI);
+  }
+
+  if (!SrcMI)
+    return false;
+
+  // Look for SXTW(X) and return Reg.
+  auto getSXTWSrcReg = [](MachineInstr *SrcMI) -> Register {
+    if (SrcMI->getOpcode() != AArch64::SBFMXri ||
+        SrcMI->getOperand(2).getImm() != 0 ||
+        SrcMI->getOperand(3).getImm() != 31)
+      return AArch64::NoRegister;
+    return SrcMI->getOperand(1).getReg();
+  };
+  // Look for SUBREG_TO_REG(ORRWrr(WZR, COPY(X.sub_32)))
+  auto getUXTWSrcReg = [&](MachineInstr *SrcMI) -> Register {
+    if (SrcMI->getOpcode() != AArch64::SUBREG_TO_REG ||
+        SrcMI->getOperand(3).getImm() != AArch64::sub_32 ||
+        !MRI->hasOneNonDBGUse(SrcMI->getOperand(2).getReg()))
+      return AArch64::NoRegister;
+    MachineInstr *Orr = MRI->getUniqueVRegDef(SrcMI->getOperand(2).getReg());
+    if (!Orr || Orr->getOpcode() != AArch64::ORRWrr ||
+        Orr->getOperand(1).getReg() != AArch64::WZR ||
+        !MRI->hasOneNonDBGUse(Orr->getOperand(2).getReg()))
+      return AArch64::NoRegister;
+    MachineInstr *Cpy = MRI->getUniqueVRegDef(Orr->getOperand(2).getReg());
+    if (!Cpy || Cpy->getOpcode() != AArch64::COPY ||
+        Cpy->getOperand(1).getSubReg() != AArch64::sub_32)
+      return AArch64::NoRegister;
+    DeadInstrs.insert(Orr);
+    return Cpy->getOperand(1).getReg();
+  };
+
+  Register SrcReg = getSXTWSrcReg(SrcMI);
+  if (!SrcReg)
+    SrcReg = getUXTWSrcReg(SrcMI);
+  if (!SrcReg)
+    return false;
+
+  MRI->constrainRegClass(SrcReg, MRI->getRegClass(InputReg));
+  LLVM_DEBUG(dbgs() << "Optimizing: " << MI);
+  MI.getOperand(1).setReg(SrcReg);
+  LLVM_DEBUG(dbgs() << "        to: " << MI);
+  for (auto *DeadMI : DeadInstrs) {
+    LLVM_DEBUG(dbgs() << "  Removing: " << *DeadMI);
+    DeadMI->eraseFromParent();
+  }
+  return true;
+}
+
 bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;
@@ -599,7 +843,7 @@ bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
   TII = static_cast<const AArch64InstrInfo *>(MF.getSubtarget().getInstrInfo());
   TRI = static_cast<const AArch64RegisterInfo *>(
       MF.getSubtarget().getRegisterInfo());
-  MLI = &getAnalysis<MachineLoopInfo>();
+  MLI = &getAnalysis<MachineLoopInfoWrapperPass>().getLI();
   MRI = &MF.getRegInfo();
 
   assert(MRI->isSSA() && "Expected to be run on SSA form!");
@@ -612,60 +856,76 @@ bool AArch64MIPeepholeOpt::runOnMachineFunction(MachineFunction &MF) {
       default:
         break;
       case AArch64::INSERT_SUBREG:
-        Changed = visitINSERT(MI);
+        Changed |= visitINSERT(MI);
         break;
       case AArch64::ANDWrr:
-        Changed = visitAND<uint32_t>(AArch64::ANDWri, MI);
+        Changed |= visitAND<uint32_t>(AArch64::ANDWri, MI);
         break;
       case AArch64::ANDXrr:
-        Changed = visitAND<uint64_t>(AArch64::ANDXri, MI);
+        Changed |= visitAND<uint64_t>(AArch64::ANDXri, MI);
         break;
       case AArch64::ORRWrs:
-        Changed = visitORR(MI);
+        Changed |= visitORR(MI);
         break;
       case AArch64::ADDWrr:
-        Changed = visitADDSUB<uint32_t>(AArch64::ADDWri, AArch64::SUBWri, MI);
+        Changed |= visitADDSUB<uint32_t>(AArch64::ADDWri, AArch64::SUBWri, MI);
         break;
       case AArch64::SUBWrr:
-        Changed = visitADDSUB<uint32_t>(AArch64::SUBWri, AArch64::ADDWri, MI);
+        Changed |= visitADDSUB<uint32_t>(AArch64::SUBWri, AArch64::ADDWri, MI);
         break;
       case AArch64::ADDXrr:
-        Changed = visitADDSUB<uint64_t>(AArch64::ADDXri, AArch64::SUBXri, MI);
+        Changed |= visitADDSUB<uint64_t>(AArch64::ADDXri, AArch64::SUBXri, MI);
         break;
       case AArch64::SUBXrr:
-        Changed = visitADDSUB<uint64_t>(AArch64::SUBXri, AArch64::ADDXri, MI);
+        Changed |= visitADDSUB<uint64_t>(AArch64::SUBXri, AArch64::ADDXri, MI);
         break;
       case AArch64::ADDSWrr:
-        Changed = visitADDSSUBS<uint32_t>({AArch64::ADDWri, AArch64::ADDSWri},
-                                          {AArch64::SUBWri, AArch64::SUBSWri},
-                                          MI);
+        Changed |=
+            visitADDSSUBS<uint32_t>({AArch64::ADDWri, AArch64::ADDSWri},
+                                    {AArch64::SUBWri, AArch64::SUBSWri}, MI);
         break;
       case AArch64::SUBSWrr:
-        Changed = visitADDSSUBS<uint32_t>({AArch64::SUBWri, AArch64::SUBSWri},
-                                          {AArch64::ADDWri, AArch64::ADDSWri},
-                                          MI);
+        Changed |=
+            visitADDSSUBS<uint32_t>({AArch64::SUBWri, AArch64::SUBSWri},
+                                    {AArch64::ADDWri, AArch64::ADDSWri}, MI);
         break;
       case AArch64::ADDSXrr:
-        Changed = visitADDSSUBS<uint64_t>({AArch64::ADDXri, AArch64::ADDSXri},
-                                          {AArch64::SUBXri, AArch64::SUBSXri},
-                                          MI);
+        Changed |=
+            visitADDSSUBS<uint64_t>({AArch64::ADDXri, AArch64::ADDSXri},
+                                    {AArch64::SUBXri, AArch64::SUBSXri}, MI);
         break;
       case AArch64::SUBSXrr:
-        Changed = visitADDSSUBS<uint64_t>({AArch64::SUBXri, AArch64::SUBSXri},
-                                          {AArch64::ADDXri, AArch64::ADDSXri},
-                                          MI);
+        Changed |=
+            visitADDSSUBS<uint64_t>({AArch64::SUBXri, AArch64::SUBSXri},
+                                    {AArch64::ADDXri, AArch64::ADDSXri}, MI);
+        break;
+      case AArch64::CSELWr:
+      case AArch64::CSELXr:
+        Changed |= visitCSEL(MI);
         break;
       case AArch64::INSvi64gpr:
-        Changed = visitINSviGPR(MI, AArch64::INSvi64lane);
+        Changed |= visitINSviGPR(MI, AArch64::INSvi64lane);
         break;
       case AArch64::INSvi32gpr:
-        Changed = visitINSviGPR(MI, AArch64::INSvi32lane);
+        Changed |= visitINSviGPR(MI, AArch64::INSvi32lane);
         break;
       case AArch64::INSvi16gpr:
-        Changed = visitINSviGPR(MI, AArch64::INSvi16lane);
+        Changed |= visitINSviGPR(MI, AArch64::INSvi16lane);
         break;
       case AArch64::INSvi8gpr:
-        Changed = visitINSviGPR(MI, AArch64::INSvi8lane);
+        Changed |= visitINSviGPR(MI, AArch64::INSvi8lane);
+        break;
+      case AArch64::INSvi64lane:
+        Changed |= visitINSvi64lane(MI);
+        break;
+      case AArch64::FMOVDr:
+        Changed |= visitFMOVDr(MI);
+        break;
+      case AArch64::UBFMXri:
+        Changed |= visitUBFMXri(MI);
+        break;
+      case AArch64::COPY:
+        Changed |= visitCopy(MI);
         break;
       }
     }

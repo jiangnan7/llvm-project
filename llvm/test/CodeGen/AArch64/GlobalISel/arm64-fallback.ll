@@ -27,22 +27,6 @@ define void @test_write_register_intrin() {
 @_ZTIi = external global ptr
 declare i32 @__gxx_personality_v0(...)
 
-; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: unable to legalize instruction: %2:_(<2 x p0>) = G_INSERT_VECTOR_ELT %0:_, %{{[0-9]+}}:_(p0), %{{[0-9]+}}:_(s32) (in function: vector_of_pointers_insertelement)
-; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for vector_of_pointers_insertelement
-; FALLBACK-WITH-REPORT-OUT-LABEL: vector_of_pointers_insertelement:
-define void @vector_of_pointers_insertelement() {
-  br label %end
-
-block:
-  %dummy = insertelement <2 x ptr> %vec, ptr null, i32 0
-  store <2 x ptr> %dummy, ptr undef
-  ret void
-
-end:
-  %vec = load <2 x ptr>, ptr undef
-  br label %block
-}
-
 ; FALLBACK-WITH-REPORT-ERR: remark: <unknown>:0:0: cannot select: RET_ReallyLR implicit $x0 (in function: strict_align_feature)
 ; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for strict_align_feature
 ; FALLBACK-WITH-REPORT-OUT-LABEL: strict_align_feature
@@ -152,6 +136,20 @@ define i32 @gc_intr() gc "statepoint-example" {
    %statepoint_token = call token (i64, i32, ptr, i32, i32, ...) @llvm.experimental.gc.statepoint.p0(i64 2882400000, i32 0, ptr elementtype(i32 ()) @extern_returning_i32, i32 0, i32 0, i32 0, i32 0) [ "deopt"() ]
    %ret = call i32 (token) @llvm.experimental.gc.result(token %statepoint_token)
    ret i32 %ret
+}
+
+declare void @llvm.assume(i1)
+
+; FALLBACK-WITH-REPORT-ERR: <unknown>:0:0: unable to translate instruction: call: '  %0 = tail call { i64, i32 } asm "subs $0, $0, #3", "=r,={@cchi},0,~{dirflag},~{fpsr},~{flags}"(i64 %a)' (in function: inline_asm_with_output_constraint)
+; FALLBACK-WITH-REPORT-ERR: warning: Instruction selection used fallback path for inline_asm_with_output_constraint
+; FALLBACK-WITH-REPORT-OUT-LABEL: inline_asm_with_output_constraint
+define i32 @inline_asm_with_output_constraint(i64 %a) {
+entry:
+  %0 = tail call { i64, i32 } asm "subs $0, $0, #3", "=r,={@cchi},0,~{dirflag},~{fpsr},~{flags}"(i64 %a)
+  %asmresult1 = extractvalue { i64, i32 } %0, 1
+  %1 = icmp ult i32 %asmresult1, 2
+  tail call void @llvm.assume(i1 %1)
+  ret i32 %asmresult1
 }
 
 attributes #1 = { "target-features"="+sve" }

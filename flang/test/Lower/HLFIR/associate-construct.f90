@@ -1,5 +1,5 @@
 ! Test lowering of associate construct to HLFIR
-! RUN: bbc -emit-fir -hlfir -o - %s | FileCheck %s
+! RUN: bbc -emit-hlfir -o - %s | FileCheck %s
 
 subroutine associate_expr(x)
   integer :: x(:)
@@ -26,7 +26,7 @@ subroutine associate_var(x)
 end subroutine
 ! CHECK-LABEL: func.func @_QPassociate_var(
 ! CHECK:  %[[VAL_1:.*]]:2 = hlfir.declare {{.*}}Ex"
-! CHECK:  %[[VAL_2:.*]]:2 = hlfir.declare %[[VAL_1]]#1 {uniq_name = "_QFassociate_varEy"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
+! CHECK:  %[[VAL_2:.*]]:2 = hlfir.declare %[[VAL_1]]#0 {uniq_name = "_QFassociate_varEy"} : (!fir.ref<i32>) -> (!fir.ref<i32>, !fir.ref<i32>)
 ! CHECK:  fir.call @_FortranAioEndIoStatement
 ! CHECK-NEXT:  return
 

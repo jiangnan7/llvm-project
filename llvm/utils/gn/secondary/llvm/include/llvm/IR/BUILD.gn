@@ -3,18 +3,27 @@ import("//llvm/utils/TableGen/tablegen.gni")
 tablegen("Attributes") {
   visibility = [ ":public_tablegen" ]
   args = [ "-gen-attrs" ]
+  tblgen_target = "//llvm/utils/TableGen:llvm-min-tblgen"
+}
+
+tablegen("RuntimeLibcalls") {
+  visibility = [ ":public_tablegen" ]
+  args = [ "-gen-runtime-libcalls" ]
+  tblgen_target = "//llvm/utils/TableGen:llvm-min-tblgen"
 }
 
 tablegen("IntrinsicImpl") {
   visibility = [ "//llvm/lib/IR" ]
   args = [ "-gen-intrinsic-impl" ]
   td_file = "Intrinsics.td"
+  tblgen_target = "//llvm/utils/TableGen:llvm-min-tblgen"
 }
 
 tablegen("IntrinsicEnums") {
   visibility = [ ":public_tablegen" ]
   args = [ "-gen-intrinsic-enums" ]
   td_file = "Intrinsics.td"
+  tblgen_target = "//llvm/utils/TableGen:llvm-min-tblgen"
 }
 
 template("gen_arch_intrinsics") {
@@ -26,6 +35,7 @@ template("gen_arch_intrinsics") {
       "-intrinsic-prefix=${invoker.intrinsic_prefix}",
     ]
     td_file = "Intrinsics.td"
+    tblgen_target = "//llvm/utils/TableGen:llvm-min-tblgen"
   }
 }
 
@@ -81,6 +91,10 @@ gen_arch_intrinsics("IntrinsicsS390") {
   intrinsic_prefix = "s390"
 }
 
+gen_arch_intrinsics("IntrinsicsSPIRV") {
+  intrinsic_prefix = "spv"
+}
+
 gen_arch_intrinsics("IntrinsicsVE") {
   intrinsic_prefix = "ve"
 }
@@ -109,6 +123,9 @@ group("public_tablegen") {
     # IR's public headers include IntrinsicEnums.inc.
     ":IntrinsicEnums",
 
+    # IR's public headers include RuntimeLibcalls.inc.
+    ":RuntimeLibcalls",
+
     # FIXME: These are only included from .cpp files at first glance.
     # Try removing them from the public_tablegen target.
     ":IntrinsicsAArch64",
@@ -124,6 +141,7 @@ group("public_tablegen") {
     ":IntrinsicsR600",
     ":IntrinsicsRISCV",
     ":IntrinsicsS390",
+    ":IntrinsicsSPIRV",
     ":IntrinsicsVE",
     ":IntrinsicsWebAssembly",
     ":IntrinsicsX86",

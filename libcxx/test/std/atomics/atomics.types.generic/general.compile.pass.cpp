@@ -8,8 +8,7 @@
 
 // UNSUPPORTED: c++03
 
-// This test requires the dylib support introduced in D68480, which shipped in macOS 11.0.
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// XFAIL: availability-synchronization_library-missing
 
 // <atomic>
 
@@ -75,8 +74,14 @@ void test() {
 
   TEST_IGNORE_NODISCARD a.is_lock_free();
 
+  TEST_DIAGNOSTIC_PUSH
+  // MSVC warning C4197: 'volatile std::atomic<operator_hijacker>': top-level volatile in cast is ignored
+  TEST_MSVC_DIAGNOSTIC_IGNORED(4197)
+
   TEST_IGNORE_NODISCARD T();
   TEST_IGNORE_NODISCARD T(v);
+
+  TEST_DIAGNOSTIC_POP
 
   TEST_IGNORE_NODISCARD a.load();
   TEST_IGNORE_NODISCARD static_cast<typename T::value_type>(a);
@@ -89,9 +94,11 @@ void test() {
   TEST_IGNORE_NODISCARD a.compare_exchange_weak(v, v);
   TEST_IGNORE_NODISCARD a.compare_exchange_strong(v, v, m);
 
+#if TEST_STD_VER >= 20
   a.wait(v);
   a.notify_one();
   a.notify_all();
+#endif
 }
 
 void test() {

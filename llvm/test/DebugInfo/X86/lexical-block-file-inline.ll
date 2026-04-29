@@ -28,12 +28,12 @@
 ; CHECK:    DW_TAG_subprogram
 ; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK:      DW_AT_abstract_origin {{.*}} {[[Offset_bar:0x[0-9abcdef]+]]}
-; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK-NOT:  {{DW_TAG|NULL}}
 ; CHECK:      DW_TAG_lexical_block
-; CHECK-NOT: {{DW_TAG|NULL}}
+; CHECK-NOT:    {{DW_TAG|NULL}}
+; CHECK:        DW_AT_abstract_origin {{.*}}[[Offset_lb:0x[0-9a-f]+]]
+; CHECK-NOT:    {{DW_TAG|NULL}}
 ; CHECK:        DW_TAG_variable
-; CHECK-NOT: {{DW_TAG|NULL}}
-; CHECK:        DW_TAG_imported_module
 
 ;; Abstract "bar" function
 ; CHECK:    [[Offset_bar]]: DW_TAG_subprogram
@@ -42,7 +42,7 @@
 ; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK:      DW_AT_inline
 ; CHECK-NOT: {{DW_TAG|NULL}}
-; CHECK:      DW_TAG_lexical_block
+; CHECK:      [[Offset_lb]]: DW_TAG_lexical_block
 ; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK:        DW_TAG_variable
 ; CHECK-NOT: {{DW_TAG|NULL}}
@@ -58,11 +58,10 @@
 ; CHECK-NEXT:   DW_AT_abstract_origin {{.*}} {[[Offset_bar]]}
 ; CHECK-NOT: {{DW_TAG|NULL}}
 ; CHECK:        DW_TAG_lexical_block
-; CHECK-NOT: {{DW_TAG|NULL}}
-; CHECK:          DW_TAG_variable
-; CHECK-NOT: {{DW_TAG|NULL}}
-; CHECK:          DW_TAG_imported_module
-
+; CHECK-NOT:      {{DW_TAG|NULL}}
+; CHECK:          DW_AT_abstract_origin {{.*}}[[Offset_lb]]
+; CHECK-NOT:    {{DW_TAG|NULL}}
+; CHECK:        DW_TAG_variable
 
 ; Function Attrs: alwaysinline nounwind
 define i32 @_Z3barv() #0 !dbg !4 {
@@ -124,10 +123,10 @@ attributes #2 = { nounwind }
 !llvm.module.flags = !{!15, !16}
 !llvm.ident = !{!17}
 
-!0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !1, producer: "clang version 3.9.0 (trunk 264349)", isOptimized: false, runtimeVersion: 0, emissionKind: 1, enums: !2, imports: !10)
+!0 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus, file: !1, producer: "clang version 3.9.0 (trunk 264349)", isOptimized: false, runtimeVersion: 0, emissionKind: 1, enums: !2)
 !1 = !DIFile(filename: "test.cpp", directory: "/")
 !2 = !{}
-!4 = distinct !DISubprogram(name: "bar", linkageName: "_Z3barv", scope: !1, file: !1, line: 2, type: !5, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !2)
+!4 = distinct !DISubprogram(name: "bar", linkageName: "_Z3barv", scope: !1, file: !1, line: 2, type: !5, isLocal: false, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, isOptimized: false, unit: !0, retainedNodes: !10)
 !5 = !DISubroutineType(types: !6)
 !6 = !{!7}
 !7 = !DIBasicType(name: "int", size: 32, align: 32, encoding: DW_ATE_signed)

@@ -18,10 +18,11 @@
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/Sequence.h"
-#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Support/Endian.h"
 #include <optional>
+
+#define DEBUG_TYPE "builtinattributes"
 
 using namespace mlir;
 using namespace mlir::detail;
@@ -42,6 +43,7 @@ void BuiltinDialect::registerAttributes() {
 #define GET_ATTRDEF_LIST
 #include "mlir/IR/BuiltinAttributes.cpp.inc"
       >();
+  addAttributes<DistinctAttr>();
 }
 
 //===----------------------------------------------------------------------===//
@@ -225,6 +227,13 @@ void StridedLayoutAttr::print(llvm::raw_ostream &os) const {
   os << ">";
 }
 
+/// Returns true if this layout is static, i.e. the strides and offset all have
+/// a known value > 0.
+bool StridedLayoutAttr::hasStaticLayout() const {
+  return ShapedType::isStatic(getOffset()) &&
+         ShapedType::isStaticShape(getStrides());
+}
+
 /// Returns the strided layout as an affine map.
 AffineMap StridedLayoutAttr::getAffineMap() const {
   return makeStridedLinearLayoutMap(getStrides(), getOffset(), getContext());
@@ -234,9 +243,6 @@ AffineMap StridedLayoutAttr::getAffineMap() const {
 LogicalResult
 StridedLayoutAttr::verify(function_ref<InFlightDiagnostic()> emitError,
                           int64_t offset, ArrayRef<int64_t> strides) {
-  if (llvm::any_of(strides, [&](int64_t stride) { return stride == 0; }))
-    return emitError() << "strides must not be zero";
-
   return success();
 }
 
@@ -247,6 +253,15 @@ LogicalResult StridedLayoutAttr::verifyLayout(
   if (shape.size() != getStrides().size())
     return emitError() << "expected the number of strides to match the rank";
 
+  return success();
+}
+
+LogicalResult
+StridedLayoutAttr::getStridesAndOffset(ArrayRef<int64_t>,
+                                       SmallVectorImpl<int64_t> &strides,
+                                       int64_t &offset) const {
+  llvm::append_range(strides, getStrides());
+  offset = getOffset();
   return success();
 }
 
@@ -300,11 +315,12 @@ double FloatAttr::getValueAsDouble(APFloat value) {
 LogicalResult FloatAttr::verify(function_ref<InFlightDiagnostic()> emitError,
                                 Type type, APFloat value) {
   // Verify that the type is correct.
-  if (!type.isa<FloatType>())
+  if (!llvm::isa<FloatType>(type))
     return emitError() << "expected floating point type";
 
   // Verify that the type semantics match that of the value.
-  if (&type.cast<FloatType>().getFloatSemantics() != &value.getSemantics()) {
+  if (&llvm::cast<FloatType>(type).getFloatSemantics() !=
+      &value.getSemantics()) {
     return emitError()
            << "FloatAttr type doesn't match the type implied by its value";
   }
@@ -321,11 +337,11 @@ SymbolRefAttr SymbolRefAttr::get(MLIRContext *ctx, StringRef value,
 }
 
 FlatSymbolRefAttr SymbolRefAttr::get(MLIRContext *ctx, StringRef value) {
-  return get(ctx, value, {}).cast<FlatSymbolRefAttr>();
+  return llvm::cast<FlatSymbolRefAttr>(get(ctx, value, {}));
 }
 
 FlatSymbolRefAttr SymbolRefAttr::get(StringAttr value) {
-  return get(value, {}).cast<FlatSymbolRefAttr>();
+  return llvm::cast<FlatSymbolRefAttr>(get(value, {}));
 }
 
 FlatSymbolRefAttr SymbolRefAttr::get(Operation *symbol) {
@@ -370,14 +386,14 @@ APSInt IntegerAttr::getAPSInt() const {
 
 LogicalResult IntegerAttr::verify(function_ref<InFlightDiagnostic()> emitError,
                                   Type type, APInt value) {
-  if (IntegerType integerType = type.dyn_cast<IntegerType>()) {
+  if (IntegerType integerType = llvm::dyn_cast<IntegerType>(type)) {
     if (integerType.getWidth() != value.getBitWidth())
       return emitError() << "integer type bit width (" << integerType.getWidth()
                          << ") doesn't match value bit width ("
                          << value.getBitWidth() << ")";
     return success();
   }
-  if (type.isa<IndexType>()) {
+  if (llvm::isa<IndexType>(type)) {
     if (value.getBitWidth() != IndexType::kInternalStorageBitWidth)
       return emitError()
              << "value bit width (" << value.getBitWidth()
@@ -390,7 +406,7 @@ LogicalResult IntegerAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 
 BoolAttr IntegerAttr::getBoolAttrUnchecked(IntegerType type, bool value) {
   auto attr = Base::get(type.getContext(), type, APInt(/*numBits=*/1, value));
-  return attr.cast<BoolAttr>();
+  return llvm::cast<BoolAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -403,7 +419,7 @@ bool BoolAttr::getValue() const {
 }
 
 bool BoolAttr::classof(Attribute attr) {
-  IntegerAttr intAttr = attr.dyn_cast<IntegerAttr>();
+  IntegerAttr intAttr = llvm::dyn_cast<IntegerAttr>(attr);
   return intAttr && intAttr.getType().isSignlessInteger(1);
 }
 
@@ -436,6 +452,9 @@ LogicalResult OpaqueAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 // DenseElementsAttr Utilities
 //===----------------------------------------------------------------------===//
 
+const char DenseIntOrFPElementsAttrStorage::kSplatTrue = ~0;
+const char DenseIntOrFPElementsAttrStorage::kSplatFalse = 0;
+
 /// Get the bitwidth of a dense element type within the buffer.
 /// DenseElementsAttr requires bitwidths greater than 1 to be aligned by 8.
 static size_t getDenseElementStorageWidth(size_t origWidth) {
@@ -462,8 +481,7 @@ static bool getBit(const char *rawData, size_t bitPos) {
 /// BE format.
 static void copyAPIntToArrayForBEmachine(APInt value, size_t numBytes,
                                          char *result) {
-  assert(llvm::support::endian::system_endianness() == // NOLINT
-         llvm::support::endianness::big);              // NOLINT
+  assert(llvm::endianness::native == llvm::endianness::big);
   assert(value.getNumWords() * APInt::APINT_WORD_SIZE >= numBytes);
 
   // Copy the words filled with data.
@@ -492,8 +510,7 @@ static void copyAPIntToArrayForBEmachine(APInt value, size_t numBytes,
 /// format.
 static void copyArrayToAPIntForBEmachine(const char *inArray, size_t numBytes,
                                          APInt &result) {
-  assert(llvm::support::endian::system_endianness() == // NOLINT
-         llvm::support::endianness::big);              // NOLINT
+  assert(llvm::endianness::native == llvm::endianness::big);
   assert(result.getNumWords() * APInt::APINT_WORD_SIZE >= numBytes);
 
   // Copy the data that fills the word of `result` from `inArray`.
@@ -534,8 +551,7 @@ static void writeBits(char *rawData, size_t bitPos, APInt value) {
 
   // Otherwise, the bit position is guaranteed to be byte aligned.
   assert((bitPos % CHAR_BIT) == 0 && "expected bitPos to be 8-bit aligned");
-  if (llvm::support::endian::system_endianness() ==
-      llvm::support::endianness::big) {
+  if (llvm::endianness::native == llvm::endianness::big) {
     // Copy from `value` to `rawData + (bitPos / CHAR_BIT)`.
     // Copying the first `llvm::divideCeil(bitWidth, CHAR_BIT)` bytes doesn't
     // work correctly in BE format.
@@ -560,8 +576,7 @@ static APInt readBits(const char *rawData, size_t bitPos, size_t bitWidth) {
   // Otherwise, the bit position must be 8-bit aligned.
   assert((bitPos % CHAR_BIT) == 0 && "expected bitPos to be 8-bit aligned");
   APInt result(bitWidth, 0);
-  if (llvm::support::endian::system_endianness() ==
-      llvm::support::endianness::big) {
+  if (llvm::endianness::native == llvm::endianness::big) {
     // Copy from `rawData + (bitPos / CHAR_BIT)` to `result`.
     // Copying the first `llvm::divideCeil(bitWidth, CHAR_BIT)` bytes doesn't
     // work correctly in BE format.
@@ -581,7 +596,7 @@ static APInt readBits(const char *rawData, size_t bitPos, size_t bitWidth) {
 /// Returns true if 'values' corresponds to a splat, i.e. one element, or has
 /// the same element count as 'type'.
 template <typename Values>
-static bool hasSameElementsOrSplat(ShapedType type, const Values &values) {
+static bool hasSameNumElementsOrSplat(ShapedType type, const Values &values) {
   return (values.size() == 1) ||
          (type.getNumElements() == static_cast<int64_t>(values.size()));
 }
@@ -592,6 +607,7 @@ static bool hasSameElementsOrSplat(ShapedType type, const Values &values) {
 
 //===----------------------------------------------------------------------===//
 // AttributeElementIterator
+//===----------------------------------------------------------------------===//
 
 DenseElementsAttr::AttributeElementIterator::AttributeElementIterator(
     DenseElementsAttr attr, size_t index)
@@ -600,21 +616,21 @@ DenseElementsAttr::AttributeElementIterator::AttributeElementIterator(
           attr.getAsOpaquePointer(), index) {}
 
 Attribute DenseElementsAttr::AttributeElementIterator::operator*() const {
-  auto owner = getFromOpaquePointer(base).cast<DenseElementsAttr>();
+  auto owner = llvm::cast<DenseElementsAttr>(getFromOpaquePointer(base));
   Type eltTy = owner.getElementType();
-  if (auto intEltTy = eltTy.dyn_cast<IntegerType>())
+  if (llvm::dyn_cast<IntegerType>(eltTy))
     return IntegerAttr::get(eltTy, *IntElementIterator(owner, index));
-  if (eltTy.isa<IndexType>())
+  if (llvm::isa<IndexType>(eltTy))
     return IntegerAttr::get(eltTy, *IntElementIterator(owner, index));
-  if (auto floatEltTy = eltTy.dyn_cast<FloatType>()) {
+  if (auto floatEltTy = llvm::dyn_cast<FloatType>(eltTy)) {
     IntElementIterator intIt(owner, index);
     FloatElementIterator floatIt(floatEltTy.getFloatSemantics(), intIt);
     return FloatAttr::get(eltTy, *floatIt);
   }
-  if (auto complexTy = eltTy.dyn_cast<ComplexType>()) {
+  if (auto complexTy = llvm::dyn_cast<ComplexType>(eltTy)) {
     auto complexEltTy = complexTy.getElementType();
     ComplexIntElementIterator complexIntIt(owner, index);
-    if (complexEltTy.isa<IntegerType>()) {
+    if (llvm::isa<IntegerType>(complexEltTy)) {
       auto value = *complexIntIt;
       auto real = IntegerAttr::get(complexEltTy, value.real());
       auto imag = IntegerAttr::get(complexEltTy, value.imag());
@@ -623,14 +639,14 @@ Attribute DenseElementsAttr::AttributeElementIterator::operator*() const {
     }
 
     ComplexFloatElementIterator complexFloatIt(
-        complexEltTy.cast<FloatType>().getFloatSemantics(), complexIntIt);
+        llvm::cast<FloatType>(complexEltTy).getFloatSemantics(), complexIntIt);
     auto value = *complexFloatIt;
     auto real = FloatAttr::get(complexEltTy, value.real());
     auto imag = FloatAttr::get(complexEltTy, value.imag());
     return ArrayAttr::get(complexTy.getContext(),
                           ArrayRef<Attribute>{real, imag});
   }
-  if (owner.isa<DenseStringElementsAttr>()) {
+  if (llvm::isa<DenseStringElementsAttr>(owner)) {
     ArrayRef<StringRef> vals = owner.getRawStringData();
     return StringAttr::get(owner.isSplat() ? vals.front() : vals[index], eltTy);
   }
@@ -639,6 +655,7 @@ Attribute DenseElementsAttr::AttributeElementIterator::operator*() const {
 
 //===----------------------------------------------------------------------===//
 // BoolElementIterator
+//===----------------------------------------------------------------------===//
 
 DenseElementsAttr::BoolElementIterator::BoolElementIterator(
     DenseElementsAttr attr, size_t dataIndex)
@@ -651,6 +668,7 @@ bool DenseElementsAttr::BoolElementIterator::operator*() const {
 
 //===----------------------------------------------------------------------===//
 // IntElementIterator
+//===----------------------------------------------------------------------===//
 
 DenseElementsAttr::IntElementIterator::IntElementIterator(
     DenseElementsAttr attr, size_t dataIndex)
@@ -666,6 +684,7 @@ APInt DenseElementsAttr::IntElementIterator::operator*() const {
 
 //===----------------------------------------------------------------------===//
 // ComplexIntElementIterator
+//===----------------------------------------------------------------------===//
 
 DenseElementsAttr::ComplexIntElementIterator::ComplexIntElementIterator(
     DenseElementsAttr attr, size_t dataIndex)
@@ -673,7 +692,7 @@ DenseElementsAttr::ComplexIntElementIterator::ComplexIntElementIterator(
                                       std::complex<APInt>, std::complex<APInt>,
                                       std::complex<APInt>>(
           attr.getRawData().data(), attr.isSplat(), dataIndex) {
-  auto complexType = attr.getElementType().cast<ComplexType>();
+  auto complexType = llvm::cast<ComplexType>(attr.getElementType());
   bitWidth = getDenseElementBitWidth(complexType.getElementType());
 }
 
@@ -713,7 +732,7 @@ template <size_t width,
           IntegerType::SignednessSemantics signedness = IntegerType::Signless>
 struct DenseArrayAttrIntUtil {
   static bool checkElementType(Type eltType) {
-    auto type = eltType.dyn_cast<IntegerType>();
+    auto type = llvm::dyn_cast<IntegerType>(eltType);
     if (!type || type.getWidth() != width)
       return false;
     return type.getSignedness() == signedness;
@@ -860,7 +879,7 @@ DenseArrayAttrImpl<T> DenseArrayAttrImpl<T>::get(MLIRContext *context,
 
 template <typename T>
 bool DenseArrayAttrImpl<T>::classof(Attribute attr) {
-  if (auto denseArray = attr.dyn_cast<DenseArrayAttr>())
+  if (auto denseArray = llvm::dyn_cast<DenseArrayAttr>(attr))
     return DenseArrayAttrUtil<T>::checkElementType(denseArray.getElementType());
   return false;
 }
@@ -884,30 +903,29 @@ template class DenseArrayAttrImpl<double>;
 
 /// Method for support type inquiry through isa, cast and dyn_cast.
 bool DenseElementsAttr::classof(Attribute attr) {
-  return attr.isa<DenseIntOrFPElementsAttr, DenseStringElementsAttr>();
+  return llvm::isa<DenseIntOrFPElementsAttr, DenseStringElementsAttr>(attr);
 }
 
 DenseElementsAttr DenseElementsAttr::get(ShapedType type,
                                          ArrayRef<Attribute> values) {
-  assert(hasSameElementsOrSplat(type, values));
+  assert(hasSameNumElementsOrSplat(type, values));
 
   Type eltType = type.getElementType();
 
   // Take care complex type case first.
-  if (auto complexType = eltType.dyn_cast<ComplexType>()) {
+  if (auto complexType = llvm::dyn_cast<ComplexType>(eltType)) {
     if (complexType.getElementType().isIntOrIndex()) {
       SmallVector<std::complex<APInt>> complexValues;
       complexValues.reserve(values.size());
       for (Attribute attr : values) {
-        assert(attr.isa<ArrayAttr>() &&
-               "expected ArrayAttr for complex");
-        auto arrayAttr = attr.cast<ArrayAttr>();
+        assert(llvm::isa<ArrayAttr>(attr) && "expected ArrayAttr for complex");
+        auto arrayAttr = llvm::cast<ArrayAttr>(attr);
         assert(arrayAttr.size() == 2 && "expected 2 element for complex");
         auto attr0 = arrayAttr[0];
         auto attr1 = arrayAttr[1];
         complexValues.push_back(
-            std::complex<APInt>(attr0.cast<IntegerAttr>().getValue(),
-                                attr1.cast<IntegerAttr>().getValue()));
+            std::complex<APInt>(llvm::cast<IntegerAttr>(attr0).getValue(),
+                                llvm::cast<IntegerAttr>(attr1).getValue()));
       }
       return DenseElementsAttr::get(type, complexValues);
     }
@@ -915,14 +933,14 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
     SmallVector<std::complex<APFloat>> complexValues;
     complexValues.reserve(values.size());
     for (Attribute attr : values) {
-      assert(attr.isa<ArrayAttr>() && "expected ArrayAttr for complex");
-      auto arrayAttr = attr.cast<ArrayAttr>();
+      assert(llvm::isa<ArrayAttr>(attr) && "expected ArrayAttr for complex");
+      auto arrayAttr = llvm::cast<ArrayAttr>(attr);
       assert(arrayAttr.size() == 2 && "expected 2 element for complex");
       auto attr0 = arrayAttr[0];
       auto attr1 = arrayAttr[1];
       complexValues.push_back(
-          std::complex<APFloat>(attr0.cast<FloatAttr>().getValue(),
-                                attr1.cast<FloatAttr>().getValue()));
+          std::complex<APFloat>(llvm::cast<FloatAttr>(attr0).getValue(),
+                                llvm::cast<FloatAttr>(attr1).getValue()));
     }
     return DenseElementsAttr::get(type, complexValues);
   }
@@ -933,9 +951,9 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
     SmallVector<StringRef, 8> stringValues;
     stringValues.reserve(values.size());
     for (Attribute attr : values) {
-      assert(attr.isa<StringAttr>() &&
+      assert(llvm::isa<StringAttr>(attr) &&
              "expected string value for non integer/index/float element");
-      stringValues.push_back(attr.cast<StringAttr>().getValue());
+      stringValues.push_back(llvm::cast<StringAttr>(attr).getValue());
     }
     return get(type, stringValues);
   }
@@ -949,12 +967,12 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
       llvm::divideCeil(storageBitWidth * values.size(), CHAR_BIT));
   APInt intVal;
   for (unsigned i = 0, e = values.size(); i < e; ++i) {
-    if (auto floatAttr = values[i].dyn_cast<FloatAttr>()) {
+    if (auto floatAttr = llvm::dyn_cast<FloatAttr>(values[i])) {
       assert(floatAttr.getType() == eltType &&
              "expected float attribute type to equal element type");
       intVal = floatAttr.getValue().bitcastToAPInt();
     } else {
-      auto intAttr = values[i].cast<IntegerAttr>();
+      auto intAttr = llvm::cast<IntegerAttr>(values[i]);
       assert(intAttr.getType() == eltType &&
              "expected integer attribute type to equal element type");
       intVal = intAttr.getValue();
@@ -974,10 +992,10 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
 
 DenseElementsAttr DenseElementsAttr::get(ShapedType type,
                                          ArrayRef<bool> values) {
-  assert(hasSameElementsOrSplat(type, values));
+  assert(hasSameNumElementsOrSplat(type, values));
   assert(type.getElementType().isInteger(1));
 
-  std::vector<char> buff(llvm::divideCeil(values.size(), CHAR_BIT));
+  SmallVector<char> buff(llvm::divideCeil(values.size(), CHAR_BIT));
 
   if (!values.empty()) {
     bool isSplat = true;
@@ -1009,15 +1027,15 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
 DenseElementsAttr DenseElementsAttr::get(ShapedType type,
                                          ArrayRef<APInt> values) {
   assert(type.getElementType().isIntOrIndex());
-  assert(hasSameElementsOrSplat(type, values));
+  assert(hasSameNumElementsOrSplat(type, values));
   size_t storageBitWidth = getDenseElementStorageWidth(type.getElementType());
   return DenseIntOrFPElementsAttr::getRaw(type, storageBitWidth, values);
 }
 DenseElementsAttr DenseElementsAttr::get(ShapedType type,
                                          ArrayRef<std::complex<APInt>> values) {
-  ComplexType complex = type.getElementType().cast<ComplexType>();
-  assert(complex.getElementType().isa<IntegerType>());
-  assert(hasSameElementsOrSplat(type, values));
+  ComplexType complex = llvm::cast<ComplexType>(type.getElementType());
+  assert(llvm::isa<IntegerType>(complex.getElementType()));
+  assert(hasSameNumElementsOrSplat(type, values));
   size_t storageBitWidth = getDenseElementStorageWidth(complex) / 2;
   ArrayRef<APInt> intVals(reinterpret_cast<const APInt *>(values.data()),
                           values.size() * 2);
@@ -1029,17 +1047,17 @@ DenseElementsAttr DenseElementsAttr::get(ShapedType type,
 // element type of 'type'.
 DenseElementsAttr DenseElementsAttr::get(ShapedType type,
                                          ArrayRef<APFloat> values) {
-  assert(type.getElementType().isa<FloatType>());
-  assert(hasSameElementsOrSplat(type, values));
+  assert(llvm::isa<FloatType>(type.getElementType()));
+  assert(hasSameNumElementsOrSplat(type, values));
   size_t storageBitWidth = getDenseElementStorageWidth(type.getElementType());
   return DenseIntOrFPElementsAttr::getRaw(type, storageBitWidth, values);
 }
 DenseElementsAttr
 DenseElementsAttr::get(ShapedType type,
                        ArrayRef<std::complex<APFloat>> values) {
-  ComplexType complex = type.getElementType().cast<ComplexType>();
-  assert(complex.getElementType().isa<FloatType>());
-  assert(hasSameElementsOrSplat(type, values));
+  ComplexType complex = llvm::cast<ComplexType>(type.getElementType());
+  assert(llvm::isa<FloatType>(complex.getElementType()));
+  assert(hasSameNumElementsOrSplat(type, values));
   ArrayRef<APFloat> apVals(reinterpret_cast<const APFloat *>(values.data()),
                            values.size() * 2);
   size_t storageBitWidth = getDenseElementStorageWidth(complex) / 2;
@@ -1098,24 +1116,44 @@ bool DenseElementsAttr::isValidRawBuffer(ShapedType type,
 static bool isValidIntOrFloat(Type type, int64_t dataEltSize, bool isInt,
                               bool isSigned) {
   // Make sure that the data element size is the same as the type element width.
-  if (getDenseElementBitWidth(type) !=
-      static_cast<size_t>(dataEltSize * CHAR_BIT))
+  auto denseEltBitWidth = getDenseElementBitWidth(type);
+  auto dataSize = static_cast<size_t>(dataEltSize * CHAR_BIT);
+  if (denseEltBitWidth != dataSize) {
+    LLVM_DEBUG(llvm::dbgs() << "expected dense element bit width "
+                            << denseEltBitWidth << " to match data size "
+                            << dataSize << " for type " << type << "\n");
     return false;
+  }
 
   // Check that the element type is either float or integer or index.
-  if (!isInt)
-    return type.isa<FloatType>();
+  if (!isInt) {
+    bool valid = llvm::isa<FloatType>(type);
+    if (!valid)
+      LLVM_DEBUG(llvm::dbgs()
+                 << "expected float type when isInt is false, but found "
+                 << type << "\n");
+    return valid;
+  }
   if (type.isIndex())
     return true;
 
-  auto intType = type.dyn_cast<IntegerType>();
-  if (!intType)
+  auto intType = llvm::dyn_cast<IntegerType>(type);
+  if (!intType) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "expected integer type when isInt is true, but found " << type
+               << "\n");
     return false;
+  }
 
   // Make sure signedness semantics is consistent.
   if (intType.isSignless())
     return true;
-  return intType.isSigned() ? isSigned : !isSigned;
+
+  bool valid = intType.isSigned() == isSigned;
+  if (!valid)
+    LLVM_DEBUG(llvm::dbgs() << "expected signedness " << isSigned
+                            << " to match type " << type << "\n");
+  return valid;
 }
 
 /// Defaults down the subclass implementation.
@@ -1142,8 +1180,8 @@ bool DenseElementsAttr::isValidIntOrFloat(int64_t dataEltSize, bool isInt,
 bool DenseElementsAttr::isValidComplex(int64_t dataEltSize, bool isInt,
                                        bool isSigned) const {
   return ::isValidIntOrFloat(
-      getElementType().cast<ComplexType>().getElementType(), dataEltSize / 2,
-      isInt, isSigned);
+      llvm::cast<ComplexType>(getElementType()).getElementType(),
+      dataEltSize / 2, isInt, isSigned);
 }
 
 /// Returns true if this attribute corresponds to a splat, i.e. if all element
@@ -1154,7 +1192,7 @@ bool DenseElementsAttr::isSplat() const {
 
 /// Return if the given complex type has an integer element type.
 static bool isComplexOfIntType(Type type) {
-  return type.cast<ComplexType>().getElementType().isa<IntegerType>();
+  return llvm::isa<IntegerType>(llvm::cast<ComplexType>(type).getElementType());
 }
 
 auto DenseElementsAttr::tryGetComplexIntValues() const
@@ -1168,7 +1206,7 @@ auto DenseElementsAttr::tryGetComplexIntValues() const
 
 auto DenseElementsAttr::tryGetFloatValues() const
     -> FailureOr<iterator_range_impl<FloatElementIterator>> {
-  auto eltTy = getElementType().dyn_cast<FloatType>();
+  auto eltTy = llvm::dyn_cast<FloatType>(getElementType());
   if (!eltTy)
     return failure();
   const auto &elementSemantics = eltTy.getFloatSemantics();
@@ -1179,10 +1217,10 @@ auto DenseElementsAttr::tryGetFloatValues() const
 
 auto DenseElementsAttr::tryGetComplexFloatValues() const
     -> FailureOr<iterator_range_impl<ComplexFloatElementIterator>> {
-  auto complexTy = getElementType().dyn_cast<ComplexType>();
+  auto complexTy = llvm::dyn_cast<ComplexType>(getElementType());
   if (!complexTy)
     return failure();
-  auto eltTy = complexTy.getElementType().dyn_cast<FloatType>();
+  auto eltTy = llvm::dyn_cast<FloatType>(complexTy.getElementType());
   if (!eltTy)
     return failure();
   const auto &semantics = eltTy.getFloatSemantics();
@@ -1247,12 +1285,14 @@ DenseElementsAttr DenseElementsAttr::bitcast(Type newElType) {
 DenseElementsAttr
 DenseElementsAttr::mapValues(Type newElementType,
                              function_ref<APInt(const APInt &)> mapping) const {
-  return cast<DenseIntElementsAttr>().mapValues(newElementType, mapping);
+  return llvm::cast<DenseIntElementsAttr>(*this).mapValues(newElementType,
+                                                           mapping);
 }
 
 DenseElementsAttr DenseElementsAttr::mapValues(
     Type newElementType, function_ref<APInt(const APFloat &)> mapping) const {
-  return cast<DenseFPElementsAttr>().mapValues(newElementType, mapping);
+  return llvm::cast<DenseFPElementsAttr>(*this).mapValues(newElementType,
+                                                          mapping);
 }
 
 ShapedType DenseElementsAttr::getType() const {
@@ -1273,7 +1313,8 @@ int64_t DenseElementsAttr::getNumElements() const {
 
 /// Utility method to write a range of APInt values to a buffer.
 template <typename APRangeT>
-static void writeAPIntsToBuffer(size_t storageWidth, std::vector<char> &data,
+static void writeAPIntsToBuffer(size_t storageWidth,
+                                SmallVectorImpl<char> &data,
                                 APRangeT &&values) {
   size_t numValues = llvm::size(values);
   data.resize(llvm::divideCeil(storageWidth * numValues, CHAR_BIT));
@@ -1295,7 +1336,7 @@ static void writeAPIntsToBuffer(size_t storageWidth, std::vector<char> &data,
 DenseElementsAttr DenseIntOrFPElementsAttr::getRaw(ShapedType type,
                                                    size_t storageWidth,
                                                    ArrayRef<APFloat> values) {
-  std::vector<char> data;
+  SmallVector<char> data;
   auto unwrapFloat = [](const APFloat &val) { return val.bitcastToAPInt(); };
   writeAPIntsToBuffer(storageWidth, data, llvm::map_range(values, unwrapFloat));
   return DenseIntOrFPElementsAttr::getRaw(type, data);
@@ -1307,7 +1348,7 @@ DenseElementsAttr DenseIntOrFPElementsAttr::getRaw(ShapedType type,
 DenseElementsAttr DenseIntOrFPElementsAttr::getRaw(ShapedType type,
                                                    size_t storageWidth,
                                                    ArrayRef<APInt> values) {
-  std::vector<char> data;
+  SmallVector<char> data;
   writeAPIntsToBuffer(storageWidth, data, values);
   return DenseIntOrFPElementsAttr::getRaw(type, data);
 }
@@ -1331,8 +1372,9 @@ DenseElementsAttr DenseIntOrFPElementsAttr::getRawComplex(ShapedType type,
                                                           bool isInt,
                                                           bool isSigned) {
   assert(::isValidIntOrFloat(
-      type.getElementType().cast<ComplexType>().getElementType(),
-      dataEltSize / 2, isInt, isSigned));
+             llvm::cast<ComplexType>(type.getElementType()).getElementType(),
+             dataEltSize / 2, isInt, isSigned) &&
+         "Try re-running with -debug-only=builtinattributes");
 
   int64_t numElements = data.size() / dataEltSize;
   (void)numElements;
@@ -1347,8 +1389,9 @@ DenseElementsAttr
 DenseIntOrFPElementsAttr::getRawIntOrFloat(ShapedType type, ArrayRef<char> data,
                                            int64_t dataEltSize, bool isInt,
                                            bool isSigned) {
-  assert(
-      ::isValidIntOrFloat(type.getElementType(), dataEltSize, isInt, isSigned));
+  assert(::isValidIntOrFloat(type.getElementType(), dataEltSize, isInt,
+                             isSigned) &&
+         "Try re-running with -debug-only=builtinattributes");
 
   int64_t numElements = data.size() / dataEltSize;
   assert(numElements == 1 || numElements == type.getNumElements());
@@ -1363,8 +1406,7 @@ void DenseIntOrFPElementsAttr::convertEndianOfCharForBEmachine(
   using llvm::support::ulittle32_t;
   using llvm::support::ulittle64_t;
 
-  assert(llvm::support::endian::system_endianness() == // NOLINT
-         llvm::support::endianness::big);              // NOLINT
+  assert(llvm::endianness::native == llvm::endianness::big);
   // NOLINT to avoid warning message about replacing by static_assert()
 
   // Following std::copy_n always converts endianness on BE machine.
@@ -1404,7 +1446,7 @@ void DenseIntOrFPElementsAttr::convertEndianOfArrayRefForBEmachine(
     ShapedType type) {
   size_t numElements = type.getNumElements();
   Type elementType = type.getElementType();
-  if (ComplexType complexTy = elementType.dyn_cast<ComplexType>()) {
+  if (ComplexType complexTy = llvm::dyn_cast<ComplexType>(elementType)) {
     elementType = complexTy.getElementType();
     numElements = numElements * 2;
   }
@@ -1470,8 +1512,8 @@ DenseElementsAttr DenseFPElementsAttr::mapValues(
 
 /// Method for supporting type inquiry through isa, cast and dyn_cast.
 bool DenseFPElementsAttr::classof(Attribute attr) {
-  if (auto denseAttr = attr.dyn_cast<DenseElementsAttr>())
-    return denseAttr.getType().getElementType().isa<FloatType>();
+  if (auto denseAttr = llvm::dyn_cast<DenseElementsAttr>(attr))
+    return llvm::isa<FloatType>(denseAttr.getType().getElementType());
   return false;
 }
 
@@ -1489,7 +1531,7 @@ DenseElementsAttr DenseIntElementsAttr::mapValues(
 
 /// Method for supporting type inquiry through isa, cast and dyn_cast.
 bool DenseIntElementsAttr::classof(Attribute attr) {
-  if (auto denseAttr = attr.dyn_cast<DenseElementsAttr>())
+  if (auto denseAttr = llvm::dyn_cast<DenseElementsAttr>(attr))
     return denseAttr.getType().getElementType().isIntOrIndex();
   return false;
 }
@@ -1514,8 +1556,15 @@ DenseResourceElementsAttr DenseResourceElementsAttr::get(ShapedType type,
   return get(type, manager.insert(blobName, std::move(blob)));
 }
 
+ArrayRef<char> DenseResourceElementsAttr::getData() {
+  if (AsmResourceBlob *blob = this->getRawHandle().getBlob())
+    return blob->getDataAs<char>();
+  return {};
+}
+
 //===----------------------------------------------------------------------===//
 // DenseResourceElementsAttrBase
+//===----------------------------------------------------------------------===//
 
 namespace {
 /// Instantiations of this class provide utilities for interacting with native
@@ -1525,7 +1574,7 @@ struct DenseResourceAttrUtil;
 template <size_t width, bool isSigned>
 struct DenseResourceElementsAttrIntUtil {
   static bool checkElementType(Type eltType) {
-    IntegerType type = eltType.dyn_cast<IntegerType>();
+    IntegerType type = llvm::dyn_cast<IntegerType>(eltType);
     if (!type || type.getWidth() != width)
       return false;
     return isSigned ? !type.isUnsigned() : !type.isSigned();
@@ -1582,8 +1631,8 @@ DenseResourceElementsAttrBase<T>::get(ShapedType type, StringRef blobName,
          "size mismatch between expected element width and blob size");
   assert(DenseResourceAttrUtil<T>::checkElementType(type.getElementType()) &&
          "invalid shape element type for provided type `T`");
-  return DenseResourceElementsAttr::get(type, blobName, std::move(blob))
-      .template cast<DenseResourceElementsAttrBase<T>>();
+  return llvm::cast<DenseResourceElementsAttrBase<T>>(
+      DenseResourceElementsAttr::get(type, blobName, std::move(blob)));
 }
 
 template <typename T>
@@ -1596,7 +1645,7 @@ DenseResourceElementsAttrBase<T>::tryGetAsArrayRef() const {
 
 template <typename T>
 bool DenseResourceElementsAttrBase<T>::classof(Attribute attr) {
-  auto resourceAttr = attr.dyn_cast<DenseResourceElementsAttr>();
+  auto resourceAttr = llvm::dyn_cast<DenseResourceElementsAttr>(attr);
   return resourceAttr && DenseResourceAttrUtil<T>::checkElementType(
                              resourceAttr.getElementType());
 }
@@ -1624,13 +1673,13 @@ template class DenseResourceElementsAttrBase<double>;
 
 /// Get a zero APFloat for the given sparse attribute.
 APFloat SparseElementsAttr::getZeroAPFloat() const {
-  auto eltType = getElementType().cast<FloatType>();
+  auto eltType = llvm::cast<FloatType>(getElementType());
   return APFloat(eltType.getFloatSemantics());
 }
 
 /// Get a zero APInt for the given sparse attribute.
 APInt SparseElementsAttr::getZeroAPInt() const {
-  auto eltType = getElementType().cast<IntegerType>();
+  auto eltType = llvm::cast<IntegerType>(getElementType());
   return APInt::getZero(eltType.getWidth());
 }
 
@@ -1639,14 +1688,14 @@ Attribute SparseElementsAttr::getZeroAttr() const {
   auto eltType = getElementType();
 
   // Handle floating point elements.
-  if (eltType.isa<FloatType>())
+  if (llvm::isa<FloatType>(eltType))
     return FloatAttr::get(eltType, 0);
 
   // Handle complex elements.
-  if (auto complexTy = eltType.dyn_cast<ComplexType>()) {
+  if (auto complexTy = llvm::dyn_cast<ComplexType>(eltType)) {
     auto eltType = complexTy.getElementType();
     Attribute zero;
-    if (eltType.isa<FloatType>())
+    if (llvm::isa<FloatType>(eltType))
       zero = FloatAttr::get(eltType, 0);
     else // must be integer
       zero = IntegerAttr::get(eltType, 0);
@@ -1655,7 +1704,7 @@ Attribute SparseElementsAttr::getZeroAttr() const {
   }
 
   // Handle string type.
-  if (getValues().isa<DenseStringElementsAttr>())
+  if (llvm::isa<DenseStringElementsAttr>(getValues()))
     return StringAttr::get("", eltType);
 
   // Otherwise, this is an integer.
@@ -1664,8 +1713,8 @@ Attribute SparseElementsAttr::getZeroAttr() const {
 
 /// Flatten, and return, all of the sparse indices in this attribute in
 /// row-major order.
-std::vector<ptrdiff_t> SparseElementsAttr::getFlattenedSparseIndices() const {
-  std::vector<ptrdiff_t> flatSparseIndices;
+SmallVector<ptrdiff_t> SparseElementsAttr::getFlattenedSparseIndices() const {
+  SmallVector<ptrdiff_t> flatSparseIndices;
 
   // The sparse indices are 64-bit integers, so we can reinterpret the raw data
   // as a 1-D index array.
@@ -1746,6 +1795,18 @@ SparseElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 }
 
 //===----------------------------------------------------------------------===//
+// DistinctAttr
+//===----------------------------------------------------------------------===//
+
+DistinctAttr DistinctAttr::create(Attribute referencedAttr) {
+  return Base::get(referencedAttr.getContext(), referencedAttr);
+}
+
+Attribute DistinctAttr::getReferencedAttr() const {
+  return getImpl()->referencedAttr;
+}
+
+//===----------------------------------------------------------------------===//
 // Attribute Utilities
 //===----------------------------------------------------------------------===//
 
@@ -1757,7 +1818,7 @@ AffineMap mlir::makeStridedLinearLayoutMap(ArrayRef<int64_t> strides,
 
   // AffineExpr for offset.
   // Static case.
-  if (!ShapedType::isDynamic(offset)) {
+  if (ShapedType::isStatic(offset)) {
     auto cst = getAffineConstantExpr(offset, context);
     expr = cst;
   } else {
@@ -1770,11 +1831,10 @@ AffineMap mlir::makeStridedLinearLayoutMap(ArrayRef<int64_t> strides,
   for (const auto &en : llvm::enumerate(strides)) {
     auto dim = en.index();
     auto stride = en.value();
-    assert(stride != 0 && "Invalid stride specification");
     auto d = getAffineDimExpr(dim, context);
     AffineExpr mult;
     // Static case.
-    if (!ShapedType::isDynamic(stride))
+    if (ShapedType::isStatic(stride))
       mult = getAffineConstantExpr(stride, context);
     else
       // Dynamic case, new symbol for each new stride.

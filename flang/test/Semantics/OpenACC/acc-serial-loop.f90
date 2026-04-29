@@ -94,4 +94,30 @@ program openacc_serial_loop_validity
   !ERROR: Unmatched END PARALLEL LOOP directive
   !$acc end parallel loop
 
+  !$acc serial loop
+  do i = 1, N
+    a(i) = 3.14
+  end do
+  !$acc end serial loop
+
+  !$acc serial loop
+  do i = 1, N
+    a(i) = 3.14
+  end do
+  !$acc end serial
+
+  !$acc serial loop
+  do i = 1, n
+    if(i == 10) cycle
+  end do
+
+  !$acc serial loop async(1) device_type(nvidia) async(3)
+  do i = 1, n
+  end do
+
+!ERROR: At most one ASYNC clause can appear on the SERIAL LOOP directive or in group separated by the DEVICE_TYPE clause
+  !$acc serial loop async(1) device_type(nvidia) async async
+  do i = 1, n
+  end do
+
 end program openacc_serial_loop_validity

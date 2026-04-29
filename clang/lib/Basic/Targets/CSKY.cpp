@@ -33,7 +33,6 @@ bool CSKYTargetInfo::setCPU(const std::string &Name) {
 
 void CSKYTargetInfo::getTargetDefines(const LangOptions &Opts,
                                       MacroBuilder &Builder) const {
-  Builder.defineMacro("__ELF__");
   Builder.defineMacro("__csky__", "2");
   Builder.defineMacro("__CSKY__", "2");
   Builder.defineMacro("__ckcore__", "2");
@@ -52,8 +51,10 @@ void CSKYTargetInfo::getTargetDefines(const LangOptions &Opts,
 
   Builder.defineMacro("__" + ArchName.upper() + "__");
   Builder.defineMacro("__" + ArchName.lower() + "__");
-  Builder.defineMacro("__" + CPUName.upper() + "__");
-  Builder.defineMacro("__" + CPUName.lower() + "__");
+  if (ArchName != CPUName) {
+    Builder.defineMacro("__" + CPUName.upper() + "__");
+    Builder.defineMacro("__" + CPUName.lower() + "__");
+  }
 
   // TODO: Add support for BE if BE was supported later
   StringRef endian = "__cskyLE__";
@@ -136,10 +137,6 @@ bool CSKYTargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
   }
 
   return true;
-}
-
-ArrayRef<Builtin::Info> CSKYTargetInfo::getTargetBuiltins() const {
-  return ArrayRef<Builtin::Info>();
 }
 
 ArrayRef<const char *> CSKYTargetInfo::getGCCRegNames() const {
@@ -307,7 +304,8 @@ bool CSKYTargetInfo::validateAsmConstraint(
   }
 }
 
-unsigned CSKYTargetInfo::getMinGlobalAlign(uint64_t Size) const {
+unsigned CSKYTargetInfo::getMinGlobalAlign(uint64_t Size,
+                                           bool HasNonWeakDef) const {
   if (Size >= 32)
     return 32;
   return 0;

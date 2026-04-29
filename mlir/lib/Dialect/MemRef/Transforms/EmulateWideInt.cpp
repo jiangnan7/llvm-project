@@ -11,6 +11,7 @@
 #include "mlir/Dialect/Arith/Transforms/WideIntEmulationConverter.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/Transforms/Transforms.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -137,7 +138,7 @@ struct EmulateWideIntPass final
 //===----------------------------------------------------------------------===//
 
 void memref::populateMemRefWideIntEmulationPatterns(
-    arith::WideIntEmulationConverter &typeConverter,
+    const arith::WideIntEmulationConverter &typeConverter,
     RewritePatternSet &patterns) {
   // Populate `memref.*` conversion patterns.
   patterns.add<ConvertMemRefAlloc, ConvertMemRefLoad, ConvertMemRefStore>(
@@ -148,7 +149,7 @@ void memref::populateMemRefWideIntEmulationConversions(
     arith::WideIntEmulationConverter &typeConverter) {
   typeConverter.addConversion(
       [&typeConverter](MemRefType ty) -> std::optional<Type> {
-        auto intTy = ty.getElementType().dyn_cast<IntegerType>();
+        auto intTy = dyn_cast<IntegerType>(ty.getElementType());
         if (!intTy)
           return ty;
 
@@ -158,7 +159,7 @@ void memref::populateMemRefWideIntEmulationConversions(
 
         Type newElemTy = typeConverter.convertType(intTy);
         if (!newElemTy)
-          return std::nullopt;
+          return nullptr;
 
         return ty.cloneWith(std::nullopt, newElemTy);
       });

@@ -3,7 +3,7 @@
 
 define <4 x i8> @splat_binop_non_splat_x(<4 x i8> %x, <4 x i8> %y) {
 ; CHECK-LABEL: @splat_binop_non_splat_x(
-; CHECK-NEXT:    [[XSPLAT:%.*]] = shufflevector <4 x i8> [[X:%.*]], <4 x i8> poison, <4 x i32> <i32 0, i32 2, i32 undef, i32 undef>
+; CHECK-NEXT:    [[XSPLAT:%.*]] = shufflevector <4 x i8> [[X:%.*]], <4 x i8> poison, <4 x i32> <i32 0, i32 2, i32 poison, i32 poison>
 ; CHECK-NEXT:    call void @use(<4 x i8> [[XSPLAT]])
 ; CHECK-NEXT:    [[B:%.*]] = add <4 x i8> [[XSPLAT]], [[Y:%.*]]
 ; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[B]], <4 x i8> poison, <4 x i32> zeroinitializer
@@ -21,7 +21,7 @@ define <4 x i8> @non_splat_binop_splat_x(<4 x i8> %x, <4 x i8> %y) {
 ; CHECK-NEXT:    [[XSPLAT:%.*]] = shufflevector <4 x i8> [[X:%.*]], <4 x i8> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    call void @use(<4 x i8> [[XSPLAT]])
 ; CHECK-NEXT:    [[B:%.*]] = sub <4 x i8> [[XSPLAT]], [[Y:%.*]]
-; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[B]], <4 x i8> poison, <4 x i32> <i32 0, i32 2, i32 undef, i32 undef>
+; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[B]], <4 x i8> poison, <4 x i32> <i32 0, i32 2, i32 poison, i32 poison>
 ; CHECK-NEXT:    ret <4 x i8> [[BSPLAT]]
 ;
   %xsplat = shufflevector <4 x i8> %x, <4 x i8> poison, <4 x i32> zeroinitializer
@@ -66,7 +66,7 @@ define <4 x i8> @splat_binop_splat_y(<4 x i8> %x, <4 x i8> %y) {
 ; CHECK-NEXT:    [[YSPLAT:%.*]] = shufflevector <4 x i8> [[Y:%.*]], <4 x i8> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    call void @use(<4 x i8> [[YSPLAT]])
 ; CHECK-NEXT:    [[TMP1:%.*]] = sub <4 x i8> [[X:%.*]], [[Y]]
-; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[TMP1]], <4 x i8> poison, <4 x i32> <i32 undef, i32 0, i32 0, i32 0>
+; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[TMP1]], <4 x i8> poison, <4 x i32> <i32 poison, i32 0, i32 0, i32 0>
 ; CHECK-NEXT:    ret <4 x i8> [[BSPLAT]]
 ;
   %ysplat = shufflevector <4 x i8> %y, <4 x i8> poison, <4 x i32> zeroinitializer
@@ -82,7 +82,7 @@ define <4 x i8> @splat_binop_splat_x_splat_y(<4 x i8> %x, <4 x i8> %y) {
 ; CHECK-NEXT:    call void @use(<4 x i8> [[XSPLAT]])
 ; CHECK-NEXT:    [[YSPLAT:%.*]] = shufflevector <4 x i8> [[Y:%.*]], <4 x i8> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    call void @use(<4 x i8> [[YSPLAT]])
-; CHECK-NEXT:    [[TMP1:%.*]] = mul nuw <4 x i8> [[Y]], [[X]]
+; CHECK-NEXT:    [[TMP1:%.*]] = mul nuw <4 x i8> [[X]], [[Y]]
 ; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x i8> [[TMP1]], <4 x i8> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    ret <4 x i8> [[BSPLAT]]
 ;
@@ -101,7 +101,7 @@ define <4 x float> @splat_binop_splat_x_splat_y_fmath_flags(<4 x float> %x, <4 x
 ; CHECK-NEXT:    call void @use(<4 x float> [[XSPLAT]])
 ; CHECK-NEXT:    [[YSPLAT:%.*]] = shufflevector <4 x float> [[Y:%.*]], <4 x float> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    call void @use(<4 x float> [[YSPLAT]])
-; CHECK-NEXT:    [[TMP1:%.*]] = fmul fast <4 x float> [[Y]], [[X]]
+; CHECK-NEXT:    [[TMP1:%.*]] = fmul fast <4 x float> [[X]], [[Y]]
 ; CHECK-NEXT:    [[BSPLAT:%.*]] = shufflevector <4 x float> [[TMP1]], <4 x float> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    ret <4 x float> [[BSPLAT]]
 ;

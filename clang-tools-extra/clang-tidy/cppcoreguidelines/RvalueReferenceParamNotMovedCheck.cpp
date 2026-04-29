@@ -7,12 +7,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "RvalueReferenceParamNotMovedCheck.h"
+#include "../utils/Matchers.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 
 using namespace clang::ast_matchers;
 
 namespace clang::tidy::cppcoreguidelines {
+
+using matchers::hasUnevaluatedContext;
 
 namespace {
 AST_MATCHER_P(LambdaExpr, valueCapturesVar, DeclarationMatcher, VarMatcher) {
@@ -28,9 +31,8 @@ AST_MATCHER_P2(Stmt, argumentOf, bool, AllowPartialMove, StatementMatcher,
                Ref) {
   if (AllowPartialMove) {
     return stmt(anyOf(Ref, hasDescendant(Ref))).matches(Node, Finder, Builder);
-  } else {
-    return Ref.matches(Node, Finder, Builder);
   }
+  return Ref.matches(Node, Finder, Builder);
 }
 } // namespace
 
@@ -39,16 +41,18 @@ void RvalueReferenceParamNotMovedCheck::registerMatchers(MatchFinder *Finder) {
 
   StatementMatcher MoveCallMatcher =
       callExpr(
-          anyOf(callee(functionDecl(hasName("::std::move"))),
-                callee(unresolvedLookupExpr(hasAnyDeclaration(
-                    namedDecl(hasUnderlyingDecl(hasName("::std::move"))))))),
           argumentCountIs(1),
+          anyOf(callee(functionDecl(hasName(MoveFunction))),
+                callee(unresolvedLookupExpr(hasAnyDeclaration(
+                    namedDecl(hasUnderlyingDecl(hasName(MoveFunction))))))),
           hasArgument(
               0, argumentOf(
                      AllowPartialMove,
                      declRefExpr(to(equalsBoundNode("param"))).bind("ref"))),
           unless(hasAncestor(
-              lambdaExpr(valueCapturesVar(equalsBoundNode("param"))))))
+              lambdaExpr(valueCapturesVar(equalsBoundNode("param"))))),
+          unless(anyOf(hasAncestor(typeLoc()),
+                       hasAncestor(expr(hasUnevaluatedContext())))))
           .bind("move-call");
 
   Finder->addMatcher(
@@ -58,30 +62,34 @@ void RvalueReferenceParamNotMovedCheck::registerMatchers(MatchFinder *Finder) {
               anyOf(isConstQualified(), substTemplateTypeParmType()))))),
           optionally(hasType(qualType(references(templateTypeParmType(
               hasDeclaration(templateTypeParmDecl().bind("template-type"))))))),
-          anyOf(hasAncestor(cxxConstructorDecl(
-                    ToParam, isDefinition(), unless(isMoveConstructor()),
-                    optionally(hasDescendant(MoveCallMatcher)))),
-                hasAncestor(functionDecl(
-                    unless(cxxConstructorDecl()), ToParam,
-                    unless(cxxMethodDecl(isMoveAssignmentOperator())),
-                    hasBody(optionally(hasDescendant(MoveCallMatcher))))))),
+          hasDeclContext(
+              functionDecl(
+                  isDefinition(), unless(isDeleted()), unless(isDefaulted()),
+                  unless(cxxConstructorDecl(isMoveConstructor())),
+                  unless(cxxMethodDecl(isMoveAssignmentOperator())), ToParam,
+                  anyOf(cxxConstructorDecl(
+                            optionally(hasDescendant(MoveCallMatcher))),
+                        functionDecl(unless(cxxConstructorDecl()),
+                                     optionally(hasBody(
+                                         hasDescendant(MoveCallMatcher))))))
+                  .bind("func"))),
       this);
 }
 
 void RvalueReferenceParamNotMovedCheck::check(
     const MatchFinder::MatchResult &Result) {
   const auto *Param = Result.Nodes.getNodeAs<ParmVarDecl>("param");
+  const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("func");
   const auto *TemplateType =
       Result.Nodes.getNodeAs<TemplateTypeParmDecl>("template-type");
 
-  if (!Param)
+  if (!Param || !Function)
     return;
 
   if (IgnoreUnnamedParams && Param->getName().empty())
     return;
 
-  const auto *Function = dyn_cast<FunctionDecl>(Param->getDeclContext());
-  if (!Function)
+  if (!Param->isUsed() && Param->hasAttr<UnusedAttr>())
     return;
 
   if (IgnoreNonDeducedTemplateTypes && TemplateType)
@@ -111,11 +119,11 @@ void RvalueReferenceParamNotMovedCheck::check(
 RvalueReferenceParamNotMovedCheck::RvalueReferenceParamNotMovedCheck(
     StringRef Name, ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context),
-      AllowPartialMove(Options.getLocalOrGlobal("AllowPartialMove", false)),
-      IgnoreUnnamedParams(
-          Options.getLocalOrGlobal("IgnoreUnnamedParams", false)),
+      AllowPartialMove(Options.get("AllowPartialMove", false)),
+      IgnoreUnnamedParams(Options.get("IgnoreUnnamedParams", false)),
       IgnoreNonDeducedTemplateTypes(
-          Options.getLocalOrGlobal("IgnoreNonDeducedTemplateTypes", false)) {}
+          Options.get("IgnoreNonDeducedTemplateTypes", false)),
+      MoveFunction(Options.get("MoveFunction", "::std::move")) {}
 
 void RvalueReferenceParamNotMovedCheck::storeOptions(
     ClangTidyOptions::OptionMap &Opts) {
@@ -123,6 +131,7 @@ void RvalueReferenceParamNotMovedCheck::storeOptions(
   Options.store(Opts, "IgnoreUnnamedParams", IgnoreUnnamedParams);
   Options.store(Opts, "IgnoreNonDeducedTemplateTypes",
                 IgnoreNonDeducedTemplateTypes);
+  Options.store(Opts, "MoveFunction", MoveFunction);
 }
 
 } // namespace clang::tidy::cppcoreguidelines

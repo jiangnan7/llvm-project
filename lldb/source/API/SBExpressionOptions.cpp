@@ -156,6 +156,13 @@ void SBExpressionOptions::SetLanguage(lldb::LanguageType language) {
   m_opaque_up->SetLanguage(language);
 }
 
+void SBExpressionOptions::SetLanguage(lldb::SBSourceLanguageName name,
+                                      uint32_t version) {
+  LLDB_INSTRUMENT_VA(this, name, version);
+
+  m_opaque_up->SetLanguage(name, version);
+}
+
 void SBExpressionOptions::SetCancelCallback(
     lldb::ExpressionCancelCallback callback, void *baton) {
   LLDB_INSTRUMENT_VA(this, callback, baton);
@@ -190,7 +197,7 @@ void SBExpressionOptions::SetSuppressPersistentResult(bool b) {
 const char *SBExpressionOptions::GetPrefix() const {
   LLDB_INSTRUMENT_VA(this);
 
-  return m_opaque_up->GetPrefix();
+  return ConstString(m_opaque_up->GetPrefix()).GetCString();
 }
 
 void SBExpressionOptions::SetPrefix(const char *prefix) {

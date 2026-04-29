@@ -13,6 +13,11 @@
 
 #include "lldb/API/SBDebugger.h"
 #include "lldb/API/SBDefines.h"
+#include "lldb/API/SBStructuredData.h"
+
+namespace lldb_private {
+class CommandPluginInterfaceImplementation;
+}
 
 namespace lldb {
 
@@ -26,6 +31,7 @@ public:
     eBroadcastBitAsynchronousErrorData = (1 << 4)
   };
 
+  SBCommandInterpreter();
   SBCommandInterpreter(const lldb::SBCommandInterpreter &rhs);
 
   ~SBCommandInterpreter();
@@ -241,19 +247,27 @@ public:
                                        lldb::SBStringList &matches,
                                        lldb::SBStringList &descriptions);
 
+  /// Returns whether an interrupt flag was raised either by the SBDebugger -
+  /// when the function is not running on the RunCommandInterpreter thread, or
+  /// by SBCommandInterpreter::InterruptCommand if it is.  If your code is doing
+  /// interruptible work, check this API periodically, and interrupt if it
+  /// returns true.
   bool WasInterrupted() const;
+
+  /// Interrupts the command currently executing in the RunCommandInterpreter
+  /// thread.
+  ///
+  /// \return
+  ///   \b true if there was a command in progress to recieve the interrupt.
+  ///   \b false if there's no command currently in flight.
+  bool InterruptCommand();
 
   // Catch commands before they execute by registering a callback that will get
   // called when the command gets executed. This allows GUI or command line
   // interfaces to intercept a command and stop it from happening
-#ifndef SWIG
   bool SetCommandOverrideCallback(const char *command_name,
                                   lldb::CommandOverrideCallback callback,
                                   void *baton);
-  SBCommandInterpreter(
-      lldb_private::CommandInterpreter *interpreter_ptr =
-          nullptr); // Access using SBDebugger::GetCommandInterpreter();
-#endif
 
   /// Return true if the command interpreter is the active IO handler.
   ///
@@ -300,7 +314,30 @@ public:
   /// and aliases.  If successful, result->GetOutput has the full expansion.
   void ResolveCommand(const char *command_line, SBCommandReturnObject &result);
 
+  SBStructuredData GetStatistics();
+
+  /// Returns a list of handled commands, output and error. Each element in
+  /// the list is a dictionary with the following keys/values:
+  /// - "command" (string): The command that was given by the user.
+  /// - "commandName" (string): The name of the executed command.
+  /// - "commandArguments" (string): The arguments of the executed command.
+  /// - "output" (string): The output of the command. Empty ("") if no output.
+  /// - "error" (string): The error of the command. Empty ("") if no error.
+  /// - "durationInSeconds" (float): The time it took to execute the command.
+  /// - "timestampInEpochSeconds" (int): The timestamp when the command is
+  ///   executed.
+  ///
+  /// Turn on settings `interpreter.save-transcript` for LLDB to populate
+  /// this list. Otherwise this list is empty.
+  SBStructuredData GetTranscript();
+
+  void SetPrintCallback(lldb::SBCommandPrintCallback callback, void *baton);
+
 protected:
+  friend class lldb_private::CommandPluginInterfaceImplementation;
+
+  /// Access using SBDebugger::GetCommandInterpreter();
+  SBCommandInterpreter(lldb_private::CommandInterpreter *interpreter_ptr);
   lldb_private::CommandInterpreter &ref();
 
   lldb_private::CommandInterpreter *get();

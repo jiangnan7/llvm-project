@@ -16,7 +16,7 @@
 ; PIC:         ldr     {{r[0-9]+}}, .LCPI0_0
 ; PIC:         .LCPI0_0:
 ; PIC-NEXT:    .Ltmp0:
-; PIC-NEXT:            .long   __stack_chk_guard(GOT_PREL)-((.LPC0_0+8)-.Ltmp0)
+; PIC-NEXT:            .long   __stack_chk_guard(GOT_PREL)-(.LPC0_0+8-.Ltmp0)
 
 define dso_local i32 @foo(i32 %t) nounwind sspstrong {
 entry:
@@ -26,3 +26,6 @@ entry:
 }
 
 declare dso_local i32 @baz(ptr)
+
+!llvm.module.flags = !{!0}
+!0 = !{i32 7, !"PIC Level", i32 2}

@@ -28,6 +28,7 @@
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
 
+#include "AbortWithPayloadFrameRecognizer.h"
 #include "SystemRuntimeMacOSX.h"
 
 #include <memory>
@@ -61,7 +62,9 @@ SystemRuntime *SystemRuntimeMacOSX::CreateInstance(Process *process) {
       case llvm::Triple::IOS:
       case llvm::Triple::TvOS:
       case llvm::Triple::WatchOS:
-      // NEED_BRIDGEOS_TRIPLE case llvm::Triple::BridgeOS:
+      case llvm::Triple::BridgeOS:
+      case llvm::Triple::DriverKit:
+      case llvm::Triple::XROS:
         create = triple_ref.getVendor() == llvm::Triple::Apple;
         break;
       default:
@@ -89,7 +92,10 @@ SystemRuntimeMacOSX::SystemRuntimeMacOSX(Process *process)
       m_libpthread_offsets(), m_dispatch_tsd_indexes_addr(LLDB_INVALID_ADDRESS),
       m_libdispatch_tsd_indexes(),
       m_dispatch_voucher_offsets_addr(LLDB_INVALID_ADDRESS),
-      m_libdispatch_voucher_offsets() {}
+      m_libdispatch_voucher_offsets() {
+
+  RegisterAbortWithPayloadFrameRecognizer(process);
+}
 
 // Destructor
 SystemRuntimeMacOSX::~SystemRuntimeMacOSX() { Clear(true); }
@@ -220,8 +226,7 @@ void SystemRuntimeMacOSX::AddThreadExtendedInfoPacketHints(
 }
 
 bool SystemRuntimeMacOSX::SafeToCallFunctionsOnThisThread(ThreadSP thread_sp) {
-  if (thread_sp && thread_sp->GetStackFrameCount() > 0 &&
-      thread_sp->GetFrameWithConcreteFrameIndex(0)) {
+  if (thread_sp && thread_sp->GetFrameWithConcreteFrameIndex(0)) {
     const SymbolContext sym_ctx(
         thread_sp->GetFrameWithConcreteFrameIndex(0)->GetSymbolContext(
             eSymbolContextSymbol));
@@ -421,7 +426,8 @@ void SystemRuntimeMacOSX::ReadLibdispatchTSDIndexes() {
           scratch_ts_sp->GetBuiltinTypeForEncodingAndBitSize(eEncodingUint, 16);
       CompilerType dispatch_tsd_indexes_s = scratch_ts_sp->CreateRecordType(
           nullptr, OptionalClangModuleID(), lldb::eAccessPublic,
-          "__lldb_dispatch_tsd_indexes_s", clang::TTK_Struct,
+          "__lldb_dispatch_tsd_indexes_s",
+          llvm::to_underlying(clang::TagTypeKind::Struct),
           lldb::eLanguageTypeC);
 
       TypeSystemClang::StartTagDeclarationDefinition(dispatch_tsd_indexes_s);
@@ -443,13 +449,13 @@ void SystemRuntimeMacOSX::ReadLibdispatchTSDIndexes() {
                                         dispatch_tsd_indexes_s);
 
       m_libdispatch_tsd_indexes.dti_version =
-          struct_reader.GetField<uint16_t>(ConstString("dti_version"));
+          struct_reader.GetField<uint16_t>("dti_version");
       m_libdispatch_tsd_indexes.dti_queue_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_queue_index"));
+          struct_reader.GetField<uint16_t>("dti_queue_index");
       m_libdispatch_tsd_indexes.dti_voucher_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_voucher_index"));
+          struct_reader.GetField<uint16_t>("dti_voucher_index");
       m_libdispatch_tsd_indexes.dti_qos_class_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_qos_class_index"));
+          struct_reader.GetField<uint16_t>("dti_qos_class_index");
     }
   }
 }
@@ -627,10 +633,8 @@ bool SystemRuntimeMacOSX::BacktraceRecordingHeadersInitialized() {
   if (!sc_list.IsEmpty()) {
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
-    AddressRange addr_range;
-    sc.GetAddressRange(eSymbolContextSymbol, 0, false, addr_range);
-    queue_info_version_address =
-        addr_range.GetBaseAddress().GetLoadAddress(&target);
+    Address addr = sc.GetFunctionOrSymbolAddress();
+    queue_info_version_address = addr.GetLoadAddress(&target);
   }
   sc_list.Clear();
 
@@ -641,10 +645,8 @@ bool SystemRuntimeMacOSX::BacktraceRecordingHeadersInitialized() {
   if (!sc_list.IsEmpty()) {
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
-    AddressRange addr_range;
-    sc.GetAddressRange(eSymbolContextSymbol, 0, false, addr_range);
-    queue_info_data_offset_address =
-        addr_range.GetBaseAddress().GetLoadAddress(&target);
+    Address addr = sc.GetFunctionOrSymbolAddress();
+    queue_info_data_offset_address = addr.GetLoadAddress(&target);
   }
   sc_list.Clear();
 
@@ -655,10 +657,8 @@ bool SystemRuntimeMacOSX::BacktraceRecordingHeadersInitialized() {
   if (!sc_list.IsEmpty()) {
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
-    AddressRange addr_range;
-    sc.GetAddressRange(eSymbolContextSymbol, 0, false, addr_range);
-    item_info_version_address =
-        addr_range.GetBaseAddress().GetLoadAddress(&target);
+    Address addr = sc.GetFunctionOrSymbolAddress();
+    item_info_version_address = addr.GetLoadAddress(&target);
   }
   sc_list.Clear();
 
@@ -669,10 +669,8 @@ bool SystemRuntimeMacOSX::BacktraceRecordingHeadersInitialized() {
   if (!sc_list.IsEmpty()) {
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
-    AddressRange addr_range;
-    sc.GetAddressRange(eSymbolContextSymbol, 0, false, addr_range);
-    item_info_data_offset_address =
-        addr_range.GetBaseAddress().GetLoadAddress(&target);
+    Address addr = sc.GetFunctionOrSymbolAddress();
+    item_info_data_offset_address = addr.GetLoadAddress(&target);
   }
 
   if (queue_info_version_address != LLDB_INVALID_ADDRESS &&

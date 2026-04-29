@@ -4,44 +4,44 @@
 %struct.Ray = type { %struct.Vec, %struct.Vec }
 %struct.Vec = type { double, double, double }
 
-define void @main() {
+define void @main(i1 %arg) {
 ; CHECK-LABEL: @main(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    br i1 undef, label [[COND_TRUE:%.*]], label [[COND_END:%.*]]
+; CHECK-NEXT:    br i1 %arg, label [[COND_TRUE:%.*]], label [[COND_END:%.*]]
 ; CHECK:       cond.true:
 ; CHECK-NEXT:    unreachable
 ; CHECK:       cond.end:
 ; CHECK-NEXT:    br label [[INVOKE_CONT:%.*]]
 ; CHECK:       invoke.cont:
-; CHECK-NEXT:    br i1 undef, label [[ARRAYCTOR_CONT:%.*]], label [[INVOKE_CONT]]
+; CHECK-NEXT:    br i1 %arg, label [[ARRAYCTOR_CONT:%.*]], label [[INVOKE_CONT]]
 ; CHECK:       arrayctor.cont:
 ; CHECK-NEXT:    [[AGG_TMP101211_SROA_0_0_IDX:%.*]] = getelementptr inbounds [[STRUCT_RAY:%.*]], ptr undef, i64 0, i32 1, i32 0
 ; CHECK-NEXT:    br label [[FOR_COND36_PREHEADER:%.*]]
 ; CHECK:       for.cond36.preheader:
-; CHECK-NEXT:    br i1 undef, label [[FOR_BODY42_LR_PH_US:%.*]], label [[_Z5CLAMPD_EXIT_1:%.*]]
+; CHECK-NEXT:    br i1 %arg, label [[FOR_BODY42_LR_PH_US:%.*]], label [[_Z5CLAMPD_EXIT_1:%.*]]
 ; CHECK:       cond.false51.us:
 ; CHECK-NEXT:    unreachable
 ; CHECK:       cond.true48.us:
-; CHECK-NEXT:    br i1 undef, label [[COND_TRUE63_US:%.*]], label [[COND_FALSE66_US:%.*]]
+; CHECK-NEXT:    br i1 %arg, label [[COND_TRUE63_US:%.*]], label [[COND_FALSE66_US:%.*]]
 ; CHECK:       cond.false66.us:
 ; CHECK-NEXT:    [[ADD_I276_US:%.*]] = fadd double 0.000000e+00, 0x3EB0C6F7A0B5ED8D
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertelement <2 x double> <double poison, double 0xBFA5CC2D1960285F>, double [[ADD_I276_US]], i32 0
 ; CHECK-NEXT:    [[TMP1:%.*]] = fadd <2 x double> <double 0.000000e+00, double 1.000000e-01>, [[TMP0]]
-; CHECK-NEXT:    [[TMP2:%.*]] = fmul <2 x double> [[TMP1]], <double 1.400000e+02, double 1.400000e+02>
+; CHECK-NEXT:    [[TMP2:%.*]] = fmul <2 x double> [[TMP1]], splat (double 1.400000e+02)
 ; CHECK-NEXT:    [[TMP3:%.*]] = fadd <2 x double> [[TMP2]], <double 5.000000e+01, double 5.200000e+01>
 ; CHECK-NEXT:    store <2 x double> [[TMP3]], ptr undef, align 8
 ; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x double> <double 2.000000e-01, double 3.000000e-01>, [[TMP1]]
 ; CHECK-NEXT:    store <2 x double> [[TMP4]], ptr [[AGG_TMP101211_SROA_0_0_IDX]], align 8
-; CHECK-NEXT:    unreachable
+; CHECK-NEXT:    ret void
 ; CHECK:       cond.true63.us:
 ; CHECK-NEXT:    unreachable
 ; CHECK:       for.body42.lr.ph.us:
-; CHECK-NEXT:    br i1 undef, label [[COND_TRUE48_US:%.*]], label [[COND_FALSE51_US:%.*]]
+; CHECK-NEXT:    br i1 %arg, label [[COND_TRUE48_US:%.*]], label [[COND_FALSE51_US:%.*]]
 ; CHECK:       _Z5clampd.exit.1:
 ; CHECK-NEXT:    br label [[FOR_COND36_PREHEADER]]
 ;
 entry:
-  br i1 undef, label %cond.true, label %cond.end
+  br i1 %arg, label %cond.true, label %cond.end
 
 cond.true:
   unreachable
@@ -50,7 +50,7 @@ cond.end:
   br label %invoke.cont
 
 invoke.cont:
-  br i1 undef, label %arrayctor.cont, label %invoke.cont
+  br i1 %arg, label %arrayctor.cont, label %invoke.cont
 
 arrayctor.cont:
   %agg.tmp99208.sroa.1.8.idx388 = getelementptr inbounds %struct.Ray, ptr undef, i64 0, i32 0, i32 1
@@ -59,13 +59,13 @@ arrayctor.cont:
   br label %for.cond36.preheader
 
 for.cond36.preheader:
-  br i1 undef, label %for.body42.lr.ph.us, label %_Z5clampd.exit.1
+  br i1 %arg, label %for.body42.lr.ph.us, label %_Z5clampd.exit.1
 
 cond.false51.us:
   unreachable
 
 cond.true48.us:
-  br i1 undef, label %cond.true63.us, label %cond.false66.us
+  br i1 %arg, label %cond.true63.us, label %cond.false66.us
 
 cond.false66.us:
   %add.i276.us = fadd double 0.000000e+00, 0.000001e+00
@@ -81,39 +81,31 @@ cond.false66.us:
   store double %add4.i246.us, ptr %agg.tmp99208.sroa.1.8.idx388, align 8
   store double %mul.i.i.us, ptr %agg.tmp101211.sroa.0.0.idx, align 8
   store double %mul2.i.i.us, ptr %agg.tmp101211.sroa.1.8.idx390, align 8
-  unreachable
+  ret void
 
 cond.true63.us:
   unreachable
 
 for.body42.lr.ph.us:
-  br i1 undef, label %cond.true48.us, label %cond.false51.us
+  br i1 %arg, label %cond.true48.us, label %cond.false51.us
 
 _Z5clampd.exit.1:
   br label %for.cond36.preheader
 }
 
-define void @test() {
+define void @test(i1 %arg) {
 ; CHECK-LABEL: @test(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    br i1 undef, label [[IF_THEN78:%.*]], label [[IF_THEN38:%.*]]
+; CHECK-NEXT:    br i1 %arg, label [[IF_THEN78:%.*]], label [[IF_THEN38:%.*]]
 ; CHECK:       if.then38:
 ; CHECK-NEXT:    [[AGG_TMP74663_SROA_0_0_IDX:%.*]] = getelementptr inbounds [[STRUCT_RAY:%.*]], ptr undef, i64 0, i32 1, i32 0
-; CHECK-NEXT:    [[TMP0:%.*]] = insertelement <2 x double> <double 6.000000e-01, double poison>, double 6.000000e-02, i32 1
-; CHECK-NEXT:    [[TMP1:%.*]] = fmul <2 x double> <double 5.000000e-01, double 8.000000e-01>, [[TMP0]]
-; CHECK-NEXT:    [[TMP2:%.*]] = fsub <2 x double> <double 2.400000e-02, double 0.000000e+00>, [[TMP1]]
-; CHECK-NEXT:    [[TMP3:%.*]] = fmul <2 x double> <double 9.000000e-01, double 9.100000e-01>, [[TMP2]]
-; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x double> <double 9.200000e-01, double 9.300000e-01>, [[TMP3]]
-; CHECK-NEXT:    [[TMP5:%.*]] = fadd <2 x double> <double 0x3FEE147AE147AE14, double 0x3FEE666666666666>, [[TMP4]]
-; CHECK-NEXT:    [[TMP6:%.*]] = fadd <2 x double> <double 0x3FEEB851EB851EB8, double 0x3FEF0A3D70A3D70A>, [[TMP5]]
-; CHECK-NEXT:    [[TMP7:%.*]] = fmul <2 x double> <double 0x3FEF5C28F5C28F5C, double 0x3FEFAE147AE147AE>, [[TMP6]]
-; CHECK-NEXT:    store <2 x double> [[TMP7]], ptr [[AGG_TMP74663_SROA_0_0_IDX]], align 8
+; CHECK-NEXT:    store <2 x double> <double 0x3FFA356C1D8A7F76, double 0x3FFDC4F38B38BEF4>, ptr [[AGG_TMP74663_SROA_0_0_IDX]], align 8
 ; CHECK-NEXT:    br label [[IF_THEN78]]
 ; CHECK:       if.then78:
 ; CHECK-NEXT:    ret void
 ;
 entry:
-  br i1 undef, label %if.then78, label %if.then38
+  br i1 %arg, label %if.then78, label %if.then38
 
 if.then38:
   %mul.i.i790 = fmul double 0.0, 0.1

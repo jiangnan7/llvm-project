@@ -15,6 +15,22 @@
 #define MLIR_IR_DIALECTIMPLEMENTATION_H
 
 #include "mlir/IR/OpImplementation.h"
+#include <type_traits>
+
+namespace {
+
+// reference https://stackoverflow.com/a/16000226
+template <typename T, typename = void>
+struct HasStaticDialectName : std::false_type {};
+
+template <typename T>
+struct HasStaticDialectName<
+    T, typename std::enable_if<
+           std::is_same<::llvm::StringLiteral,
+                        std::decay_t<decltype(T::dialectName)>>::value,
+           void>::type> : std::true_type {};
+
+} // namespace
 
 namespace mlir {
 
@@ -63,6 +79,9 @@ struct FieldParser<
     AttributeT, std::enable_if_t<std::is_base_of<Attribute, AttributeT>::value,
                                  AttributeT>> {
   static FailureOr<AttributeT> parse(AsmParser &parser) {
+    if constexpr (HasStaticDialectName<AttributeT>::value) {
+      parser.getContext()->getOrLoadDialect(AttributeT::dialectName);
+    }
     AttributeT value;
     if (parser.parseCustomAttributeWithFallback(value))
       return failure();
@@ -70,7 +89,7 @@ struct FieldParser<
   }
 };
 
-/// Parse an attribute.
+/// Parse a type.
 template <typename TypeT>
 struct FieldParser<
     TypeT, std::enable_if_t<std::is_base_of<Type, TypeT>::value, TypeT>> {
@@ -87,7 +106,7 @@ template <typename IntT>
 struct FieldParser<IntT,
                    std::enable_if_t<std::is_integral<IntT>::value, IntT>> {
   static FailureOr<IntT> parse(AsmParser &parser) {
-    IntT value;
+    IntT value = 0;
     if (parser.parseInteger(value))
       return failure();
     return value;
@@ -112,6 +131,9 @@ struct FieldParser<
     std::enable_if_t<std::is_base_of<Attribute, AttributeT>::value,
                      std::optional<AttributeT>>> {
   static FailureOr<std::optional<AttributeT>> parse(AsmParser &parser) {
+    if constexpr (HasStaticDialectName<AttributeT>::value) {
+      parser.getContext()->getOrLoadDialect(AttributeT::dialectName);
+    }
     AttributeT attr;
     OptionalParseResult result = parser.parseOptionalAttribute(attr);
     if (result.has_value()) {
@@ -140,12 +162,18 @@ struct FieldParser<
   }
 };
 
+namespace detail {
+template <typename T>
+using has_push_back_t = decltype(std::declval<T>().push_back(
+    std::declval<typename T::value_type &&>()));
+} // namespace detail
+
 /// Parse any container that supports back insertion as a list.
 template <typename ContainerT>
-struct FieldParser<
-    ContainerT, std::enable_if_t<std::is_member_function_pointer<
-                                     decltype(&ContainerT::push_back)>::value,
-                                 ContainerT>> {
+struct FieldParser<ContainerT,
+                   std::enable_if_t<llvm::is_detected<detail::has_push_back_t,
+                                                      ContainerT>::value,
+                                    ContainerT>> {
   using ElementT = typename ContainerT::value_type;
   static FailureOr<ContainerT> parse(AsmParser &parser) {
     ContainerT elements;
@@ -153,7 +181,7 @@ struct FieldParser<
       auto element = FieldParser<ElementT>::parse(parser);
       if (failed(element))
         return failure();
-      elements.push_back(*element);
+      elements.push_back(std::move(*element));
       return success();
     };
     if (parser.parseCommaSeparatedList(elementParser))

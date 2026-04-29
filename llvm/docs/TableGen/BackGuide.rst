@@ -452,20 +452,6 @@ The following steps are required to create a new backend for TableGen.
    one instance for Clang and another for LLVM. Or you may be building
    your own instance.
 
-#. Modify the selected ``tablegen.cpp`` to include your new backend.
-
-  a. Add the name to the enumerated type ``ActionType``.
-
-  #. Add a keyword to the ``ActionType`` command option using the
-     ``clEnumValN()`` function.
-
-  #. Add a case to the ``switch`` statement in the *xxx*\ ``TableGenMain()``
-     function. It should invoke the "main function" of your backend, which
-     in this case, according to convention, is named ``EmitAddressModes``.
-
-5. Add a declaration of your "main function" to the corresponding
-   ``TableGenBackends.h`` header file.
-
 #. Add your backend C++ file to the appropriate ``CMakeLists.txt`` file so
    that it will be built.
 
@@ -498,11 +484,14 @@ unit for writing a new TableGen backend. Here are a few notes on the file.
 * The ``run`` function should use the ``emitSourceFileHeader`` helper function
   to include a standard header in the emitted file.
 
-* The only function in the ``llvm`` namespace is the backend "main function."
-  In this example, it is named ``EmitAddressModes``. It creates an instance
-  of the ``AddressModesEmitter`` class, passing the ``RecordKeeper``
-  instance, then invokes the ``run`` function, passing the ``raw_ostream``
-  instance.
+* Register the class or the function as the command line option
+  with ``llvm/TableGen/TableGenBackend.h``.
+
+  * Use ``llvm::TableGen::Emitter::OptClass<AddressModesEmitter>``
+    if the class has the constructor ``(RK)`` and
+    the method ``run(OS)``.
+
+  * Otherwise, use ``llvm::TableGen::Emitter::Opt``.
 
 All the examples in the remainder of this document will assume the naming
 conventions used in the skeleton file.
@@ -621,29 +610,28 @@ functions returns null.
 Getting Record Superclasses
 ===========================
 
-The ``Record`` class provides a function to obtain the superclasses of a
-record. It is named ``getSuperClasses`` and returns an ``ArrayRef`` of an
-array of ``std::pair`` pairs. The superclasses are in post-order: the order
-in which the superclasses were visited while copying their fields into the
-record. Each pair consists of a pointer to the ``Record`` instance for a
-superclass record and an instance of the ``SMRange`` class. The range
-indicates the source file locations of the beginning and end of the class
-definition.
+The ``Record`` class provides a function to obtain the direct superclasses
+of a record. It is named ``getDirectSuperClasses`` and returns an
+``ArrayRef`` of an array of ``std::pair`` pairs. Each pair consists of a
+pointer to the ``Record`` instance for a superclass record and an instance
+of the ``SMRange`` class. The range indicates the source file locations of
+the beginning and end of the class definition.
 
-This example obtains the superclasses of the ``Prototype`` record and then
-iterates over the pairs in the returned array.
+This example obtains the direct superclasses of the ``Prototype`` record and
+then iterates over the pairs in the returned array.
 
 .. code-block:: text
 
-  ArrayRef<std::pair<Record *, SMRange>>
-      Superclasses = Prototype->getSuperClasses();
-  for (const auto &SuperPair : Superclasses) {
+  ArrayRef<std::pair<const Record *, SMRange>>
+      Superclasses = Prototype->getDirectSuperClasses();
+  for (const auto &[Super, Range] : Superclasses) {
     ...
   }
 
-The ``Record`` class also provides a function, ``getDirectSuperClasses``, to
-append the *direct* superclasses of a record to a given vector of type
-``SmallVectorImpl<Record *>``.
+The ``Record`` class also provides a function, ``getSuperClasses``, to
+return a vector of *all* superclasses of a record. The superclasses are in
+post-order: the order in which the superclasses were visited while copying
+their fields into the record.
 
 Emitting Text to the Output Stream
 ==================================
@@ -772,7 +760,7 @@ over time. The output looks like this.
 
   -------------------- Global Variables (5) --------------------
 
-  AMDGPUBufferIntrinsics = [int_amdgcn_buffer_load_format, ...
+  AMDGPUBufferIntrinsics = [int_amdgcn_s_buffer_load, ...
   AMDGPUImageDimAtomicIntrinsics = [int_amdgcn_image_atomic_swap_1d, ...
   ...
   -------------------- Classes (758) --------------------

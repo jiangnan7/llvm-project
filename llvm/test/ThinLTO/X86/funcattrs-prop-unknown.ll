@@ -8,8 +8,8 @@ target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
 ; CHECK-NOT: ; Function Attrs:
-; CHECK: define i32 @indirect(ptr nocapture %0) {
-define i32 @indirect(ptr nocapture) {
+; CHECK: define i32 @indirect(ptr captures(none) %0) {
+define i32 @indirect(ptr captures(none)) {
   %2 = tail call i32 %0()
   ret i32 %2
 }
@@ -26,7 +26,7 @@ entry:
 ; CHECK: define void @selectcallee() {
 define void @selectcallee() {
     ; Test calls that aren't handled either as direct or indirect.
-    call void select (i1 icmp eq (ptr @global, ptr null), ptr @f, ptr @g)()
+    call void getelementptr (i8, ptr @f, i64 ptrtoint (ptr @g to i64))()
     ret void
 }
 

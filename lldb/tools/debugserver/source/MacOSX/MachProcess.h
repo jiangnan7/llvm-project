@@ -34,7 +34,6 @@
 #include "MachVMMemory.h"
 #include "PThreadCondition.h"
 #include "PThreadEvent.h"
-#include "PThreadMutex.h"
 #include "RNBContext.h"
 #include "ThreadInfo.h"
 
@@ -72,12 +71,11 @@ public:
   struct binary_image_information {
     std::string filename;
     uint64_t load_address;
-    uint64_t mod_date; // may not be available - 0 if so
     struct mach_o_information macho_info;
     bool is_valid_mach_header;
 
     binary_image_information()
-        : filename(), load_address(INVALID_NUB_ADDRESS), mod_date(0),
+        : filename(), load_address(INVALID_NUB_ADDRESS),
           is_valid_mach_header(false) {}
   };
 
@@ -104,6 +102,8 @@ public:
       const char *stdin_path, const char *stdout_path, const char *stderr_path,
       bool no_stdio, MachProcess *process, int disable_aslr, DNBError &err);
   nub_addr_t GetDYLDAllImageInfosAddress();
+  std::optional<std::pair<cpu_type_t, cpu_subtype_t>>
+  GetMainBinaryCPUTypes(nub_process_t pid);
   static const void *PrepareForAttach(const char *path,
                                       nub_launch_flavor_t launch_flavor,
                                       bool waitfor, DNBError &err_str);
@@ -127,6 +127,11 @@ public:
   static bool GetOSVersionNumbers(uint64_t *major, uint64_t *minor,
                                   uint64_t *patch);
   static std::string GetMacCatalystVersionString();
+
+  static nub_process_t GetParentProcessID(nub_process_t child_pid);
+
+  static bool ProcessIsBeingDebugged(nub_process_t pid);
+
 #ifdef WITH_BKS
   static void BKSCleanupAfterAttach(const void *attach_token,
                                     DNBError &err_str);
@@ -259,7 +264,8 @@ public:
                                      int wordsize,
                                      struct mach_o_information &inf);
   JSONGenerator::ObjectSP FormatDynamicLibrariesIntoJSON(
-      const std::vector<struct binary_image_information> &image_infos);
+      const std::vector<struct binary_image_information> &image_infos,
+      bool report_load_commands);
   uint32_t GetPlatform();
   /// Get the runtime platform from DYLD via SPI.
   uint32_t GetProcessPlatformViaDYLDSPI();
@@ -271,12 +277,12 @@ public:
   /// command details.
   void GetAllLoadedBinariesViaDYLDSPI(
       std::vector<struct binary_image_information> &image_infos);
-  JSONGenerator::ObjectSP GetLoadedDynamicLibrariesInfos(
-      nub_process_t pid, nub_addr_t image_list_address, nub_addr_t image_count);
   JSONGenerator::ObjectSP
   GetLibrariesInfoForAddresses(nub_process_t pid,
                                std::vector<uint64_t> &macho_addresses);
-  JSONGenerator::ObjectSP GetAllLoadedLibrariesInfos(nub_process_t pid);
+  JSONGenerator::ObjectSP
+  GetAllLoadedLibrariesInfos(nub_process_t pid,
+                             bool fetch_report_load_commands);
   JSONGenerator::ObjectSP GetSharedCacheInfo(nub_process_t pid);
 
   nub_size_t GetNumThreads() const;
@@ -383,6 +389,9 @@ private:
   void PrivateResume();
   void StopProfileThread();
 
+  void RefineWatchpointStopInfo(nub_thread_t tid,
+                                struct DNBThreadStopInfo *stop_info);
+
   uint32_t Flags() const { return m_flags; }
   nub_state_t DoSIGSTOP(bool clear_bps_and_wps, bool allow_running,
                         uint32_t *thread_idx_ptr);
@@ -403,7 +412,7 @@ private:
   uint32_t m_stop_count; // A count of many times have we stopped
   pthread_t m_stdio_thread;   // Thread ID for the thread that watches for child
                               // process stdio
-  PThreadMutex m_stdio_mutex; // Multithreaded protection for stdio
+  std::recursive_mutex m_stdio_mutex; // Multithreaded protection for stdio
   std::string m_stdout_data;
 
   bool m_profile_enabled; // A flag to indicate if profiling is enabled
@@ -413,11 +422,11 @@ private:
       m_profile_scan_type; // Indicates what needs to be profiled
   pthread_t
       m_profile_thread; // Thread ID for the thread that profiles the inferior
-  PThreadMutex
+  std::recursive_mutex
       m_profile_data_mutex; // Multithreaded protection for profile info data
   std::vector<std::string>
       m_profile_data; // Profile data, must be protected by m_profile_data_mutex
-  PThreadEvent m_profile_events; // Used for the profile thread cancellable wait  
+  PThreadEvent m_profile_events; // Used for the profile thread cancellable wait
   DNBThreadResumeActions m_thread_actions; // The thread actions for the current
                                            // MachProcess::Resume() call
   MachException::Message::collection m_exception_messages; // A collection of
@@ -425,15 +434,16 @@ private:
                                                            // caught when
                                                            // listening to the
                                                            // exception port
-  PThreadMutex m_exception_messages_mutex; // Multithreaded protection for
-                                           // m_exception_messages
+  std::recursive_mutex
+      m_exception_and_signal_mutex; // Multithreaded protection for
+                                    // exceptions and signals.
 
   MachThreadList m_thread_list; // A list of threads that is maintained/updated
                                 // after each stop
   Genealogy m_activities; // A list of activities that is updated after every
                           // stop lazily
   nub_state_t m_state;    // The state of our process
-  PThreadMutex m_state_mutex; // Multithreaded protection for m_state
+  std::recursive_mutex m_state_mutex; // Multithreaded protection for m_state
   PThreadEvent m_events;      // Process related events in the child processes
                               // lifetime can be waited upon
   PThreadEvent m_private_events; // Used to coordinate running and stopping the

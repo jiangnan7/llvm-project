@@ -13,6 +13,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/IndentedOstream.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/GraphWriter.h"
 #include <map>
@@ -28,7 +29,7 @@ using namespace mlir;
 
 static const StringRef kLineStyleControlFlow = "dashed";
 static const StringRef kLineStyleDataFlow = "solid";
-static const StringRef kShapeNode = "ellipse";
+static const StringRef kShapeNode = "Mrecord";
 static const StringRef kShapeNone = "plain";
 
 /// Return the size limits for eliding large attributes.
@@ -45,17 +46,26 @@ static std::string strFromOs(function_ref<void(raw_ostream &)> func) {
   std::string buf;
   llvm::raw_string_ostream os(buf);
   func(os);
-  return os.str();
-}
-
-/// Escape special characters such as '\n' and quotation marks.
-static std::string escapeString(std::string str) {
-  return strFromOs([&](raw_ostream &os) { os.write_escaped(str); });
+  return buf;
 }
 
 /// Put quotation marks around a given string.
 static std::string quoteString(const std::string &str) {
   return "\"" + str + "\"";
+}
+
+/// For Graphviz record nodes:
+/// " Braces, vertical bars and angle brackets must be escaped with a backslash
+/// character if you wish them to appear as a literal character "
+std::string escapeLabelString(const std::string &str) {
+  std::string buf;
+  llvm::raw_string_ostream os(buf);
+  for (char c : str) {
+    if (llvm::is_contained({'{', '|', '<', '}', '>', '\n', '"'}, c))
+      os << '\\';
+    os << c;
+  }
+  return buf;
 }
 
 using AttributeMap = std::map<std::string, std::string>;
@@ -78,6 +88,12 @@ public:
   std::optional<int> clusterId;
 };
 
+struct DataFlowEdge {
+  Value value;
+  Node node;
+  std::string port;
+};
+
 /// This pass generates a Graphviz dataflow visualization of an MLIR operation.
 /// Note: See https://www.graphviz.org/doc/info/lang.html for more information
 /// about the Graphviz DOT language.
@@ -87,23 +103,54 @@ public:
   PrintOpPass(const PrintOpPass &o) : PrintOpPass(o.os.getOStream()) {}
 
   void runOnOperation() override {
+    initColorMapping(*getOperation());
     emitGraph([&]() {
       processOperation(getOperation());
       emitAllEdgeStmts();
     });
+    markAllAnalysesPreserved();
   }
 
   /// Create a CFG graph for a region. Used in `Region::viewGraph`.
   void emitRegionCFG(Region &region) {
     printControlFlowEdges = true;
     printDataFlowEdges = false;
+    initColorMapping(region);
     emitGraph([&]() { processRegion(region); });
   }
 
 private:
+  /// Generate a color mapping that will color every operation with the same
+  /// name the same way. It'll interpolate the hue in the HSV color-space,
+  /// using muted colors that provide good contrast for black text.
+  template <typename T>
+  void initColorMapping(T &irEntity) {
+    backgroundColors.clear();
+    SmallVector<Operation *> ops;
+    irEntity.walk([&](Operation *op) {
+      auto &entry = backgroundColors[op->getName()];
+      if (entry.first == 0)
+        ops.push_back(op);
+      ++entry.first;
+    });
+    for (auto indexedOps : llvm::enumerate(ops)) {
+      double hue = ((double)indexedOps.index()) / ops.size();
+      // Use lower saturation (0.3) and higher value (0.95) for better
+      // readability
+      backgroundColors[indexedOps.value()->getName()].second =
+          std::to_string(hue) + " 0.3 0.95";
+    }
+  }
+
   /// Emit all edges. This function should be called after all nodes have been
   /// emitted.
   void emitAllEdgeStmts() {
+    if (printDataFlowEdges) {
+      for (const auto &e : dataFlowEdges) {
+        emitEdgeStmt(valueToNode[e.value], e.node, e.port, kLineStyleDataFlow);
+      }
+    }
+
     for (const std::string &edge : edges)
       os << edge << ";\n";
     edges.clear();
@@ -117,8 +164,7 @@ private:
     os.indent();
     // Emit invisible anchor node from/to which arrows can be drawn.
     Node anchorNode = emitNodeStmt(" ", kShapeNone);
-    os << attrStmt("label", quoteString(escapeString(std::move(label))))
-       << ";\n";
+    os << attrStmt("label", quoteString(label)) << ";\n";
     builder();
     os.unindent();
     os << "}\n";
@@ -145,21 +191,22 @@ private:
     int64_t largeAttrLimit = getLargeAttributeSizeLimit();
 
     // Always emit splat attributes.
-    if (attr.isa<SplatElementsAttr>()) {
-      attr.print(os);
+    if (isa<SplatElementsAttr>(attr)) {
+      os << escapeLabelString(
+          strFromOs([&](raw_ostream &os) { attr.print(os); }));
       return;
     }
 
     // Elide "big" elements attributes.
-    auto elements = attr.dyn_cast<ElementsAttr>();
+    auto elements = dyn_cast<ElementsAttr>(attr);
     if (elements && elements.getNumElements() > largeAttrLimit) {
-      os << std::string(elements.getType().getRank(), '[') << "..."
-         << std::string(elements.getType().getRank(), ']') << " : "
-         << elements.getType();
+      os << std::string(elements.getShapedType().getRank(), '[') << "..."
+         << std::string(elements.getShapedType().getRank(), ']') << " : ";
+      emitMlirType(os, elements.getType());
       return;
     }
 
-    auto array = attr.dyn_cast<ArrayAttr>();
+    auto array = dyn_cast<ArrayAttr>(attr);
     if (array && static_cast<int64_t>(array.size()) > largeAttrLimit) {
       os << "[...]";
       return;
@@ -169,19 +216,27 @@ private:
     std::string buf;
     llvm::raw_string_ostream ss(buf);
     attr.print(ss);
-    os << truncateString(ss.str());
+    os << escapeLabelString(truncateString(buf));
+  }
+
+  // Print a truncated and escaped MLIR type to `os`.
+  void emitMlirType(raw_ostream &os, Type type) {
+    std::string buf;
+    llvm::raw_string_ostream ss(buf);
+    type.print(ss);
+    os << escapeLabelString(truncateString(buf));
+  }
+
+  // Print a truncated and escaped MLIR operand to `os`.
+  void emitMlirOperand(raw_ostream &os, Value operand) {
+    operand.printAsOperand(os, OpPrintingFlags());
   }
 
   /// Append an edge to the list of edges.
   /// Note: Edges are written to the output stream via `emitAllEdgeStmts`.
-  void emitEdgeStmt(Node n1, Node n2, std::string label, StringRef style) {
+  void emitEdgeStmt(Node n1, Node n2, std::string port, StringRef style) {
     AttributeMap attrs;
     attrs["style"] = style.str();
-    // Do not label edges that start/end at a cluster boundary. Such edges are
-    // clipped at the boundary, but labels are not. This can lead to labels
-    // floating around without any edge next to them.
-    if (!n1.clusterId && !n2.clusterId)
-      attrs["label"] = quoteString(escapeString(std::move(label)));
     // Use `ltail` and `lhead` to draw edges between clusters.
     if (n1.clusterId)
       attrs["ltail"] = "cluster_" + std::to_string(*n1.clusterId);
@@ -189,7 +244,15 @@ private:
       attrs["lhead"] = "cluster_" + std::to_string(*n2.clusterId);
 
     edges.push_back(strFromOs([&](raw_ostream &os) {
-      os << llvm::format("v%i -> v%i ", n1.id, n2.id);
+      os << "v" << n1.id;
+      if (!port.empty() && !n1.clusterId)
+        // Attach edge to south compass point of the result
+        os << ":res" << port << ":s";
+      os << " -> ";
+      os << "v" << n2.id;
+      if (!port.empty() && !n2.clusterId)
+        // Attach edge to north compass point of the operand
+        os << ":arg" << port << ":n";
       emitAttrList(os, attrs);
     }));
   }
@@ -206,19 +269,34 @@ private:
   }
 
   /// Emit a node statement.
-  Node emitNodeStmt(std::string label, StringRef shape = kShapeNode) {
+  Node emitNodeStmt(std::string label, StringRef shape = kShapeNode,
+                    StringRef background = "") {
     int nodeId = ++counter;
     AttributeMap attrs;
-    attrs["label"] = quoteString(escapeString(std::move(label)));
+    attrs["label"] = quoteString(label);
     attrs["shape"] = shape.str();
+    if (!background.empty()) {
+      attrs["style"] = "filled";
+      attrs["fillcolor"] = quoteString(background.str());
+    }
     os << llvm::format("v%i ", nodeId);
     emitAttrList(os, attrs);
     os << ";\n";
     return Node(nodeId);
   }
 
-  /// Generate a label for an operation.
-  std::string getLabel(Operation *op) {
+  std::string getValuePortName(Value operand) {
+    // Print value as an operand and omit the leading '%' character.
+    auto str = strFromOs([&](raw_ostream &os) {
+      operand.printAsOperand(os, OpPrintingFlags());
+    });
+    // Replace % and # with _
+    llvm::replace(str, '%', '_');
+    llvm::replace(str, '#', '_');
+    return str;
+  }
+
+  std::string getClusterLabel(Operation *op) {
     return strFromOs([&](raw_ostream &os) {
       // Print operation name and type.
       os << op->getName();
@@ -227,24 +305,78 @@ private:
         std::string buf;
         llvm::raw_string_ostream ss(buf);
         interleaveComma(op->getResultTypes(), ss);
-        os << truncateString(ss.str()) << ")";
-        os << ")";
+        os << truncateString(buf) << ")";
       }
 
       // Print attributes.
       if (printAttrs) {
-        os << "\n";
+        os << "\\l";
         for (const NamedAttribute &attr : op->getAttrs()) {
-          os << '\n' << attr.getName().getValue() << ": ";
+          os << escapeLabelString(attr.getName().getValue().str()) << ": ";
           emitMlirAttr(os, attr.getValue());
+          os << "\\l";
         }
       }
     });
   }
 
+  /// Generate a label for an operation.
+  std::string getRecordLabel(Operation *op) {
+    return strFromOs([&](raw_ostream &os) {
+      os << "{";
+
+      // Print operation inputs.
+      if (op->getNumOperands() > 0) {
+        os << "{";
+        auto operandToPort = [&](Value operand) {
+          os << "<arg" << getValuePortName(operand) << "> ";
+          emitMlirOperand(os, operand);
+        };
+        interleave(op->getOperands(), os, operandToPort, "|");
+        os << "}|";
+      }
+      // Print operation name and type.
+      os << op->getName() << "\\l";
+
+      // Print attributes.
+      if (printAttrs && !op->getAttrs().empty()) {
+        // Extra line break to separate attributes from the operation name.
+        os << "\\l";
+        for (const NamedAttribute &attr : op->getAttrs()) {
+          os << attr.getName().getValue() << ": ";
+          emitMlirAttr(os, attr.getValue());
+          os << "\\l";
+        }
+      }
+
+      if (op->getNumResults() > 0) {
+        os << "|{";
+        auto resultToPort = [&](Value result) {
+          os << "<res" << getValuePortName(result) << "> ";
+          emitMlirOperand(os, result);
+          if (printResultTypes) {
+            os << " ";
+            emitMlirType(os, result.getType());
+          }
+        };
+        interleave(op->getResults(), os, resultToPort, "|");
+        os << "}";
+      }
+
+      os << "}";
+    });
+  }
+
   /// Generate a label for a block argument.
   std::string getLabel(BlockArgument arg) {
-    return "arg" + std::to_string(arg.getArgNumber());
+    return strFromOs([&](raw_ostream &os) {
+      os << "<res" << getValuePortName(arg) << "> ";
+      arg.printAsOperand(os, OpPrintingFlags());
+      if (printResultTypes) {
+        os << " ";
+        emitMlirType(os, arg.getType());
+      }
+    });
   }
 
   /// Process a block. Emit a cluster and one node per block argument and
@@ -253,14 +385,12 @@ private:
     emitClusterStmt([&]() {
       for (BlockArgument &blockArg : block.getArguments())
         valueToNode[blockArg] = emitNodeStmt(getLabel(blockArg));
-
       // Emit a node for each operation.
       std::optional<Node> prevNode;
       for (Operation &op : block) {
         Node nextNode = processOperation(&op);
         if (printControlFlowEdges && prevNode)
-          emitEdgeStmt(*prevNode, nextNode, /*label=*/"",
-                       kLineStyleControlFlow);
+          emitEdgeStmt(*prevNode, nextNode, /*port=*/"", kLineStyleControlFlow);
         prevNode = nextNode;
       }
     });
@@ -277,18 +407,19 @@ private:
             for (Region &region : op->getRegions())
               processRegion(region);
           },
-          getLabel(op));
+          getClusterLabel(op));
     } else {
-      node = emitNodeStmt(getLabel(op));
+      node = emitNodeStmt(getRecordLabel(op), kShapeNode,
+                          backgroundColors[op->getName()].second);
     }
 
     // Insert data flow edges originating from each operand.
     if (printDataFlowEdges) {
       unsigned numOperands = op->getNumOperands();
-      for (unsigned i = 0; i < numOperands; i++)
-        emitEdgeStmt(valueToNode[op->getOperand(i)], node,
-                     /*label=*/numOperands == 1 ? "" : std::to_string(i),
-                     kLineStyleDataFlow);
+      for (unsigned i = 0; i < numOperands; i++) {
+        auto operand = op->getOperand(i);
+        dataFlowEdges.push_back({operand, node, getValuePortName(operand)});
+      }
     }
 
     for (Value result : op->getResults())
@@ -317,8 +448,12 @@ private:
   std::vector<std::string> edges;
   /// Mapping of SSA values to Graphviz nodes/clusters.
   DenseMap<Value, Node> valueToNode;
+  /// Output for data flow edges is delayed until the end to handle cycles
+  std::vector<DataFlowEdge> dataFlowEdges;
   /// Counter for generating unique node/subgraph identifiers.
   int counter = 0;
+
+  DenseMap<OperationName, std::pair<int, std::string>> backgroundColors;
 };
 
 } // namespace

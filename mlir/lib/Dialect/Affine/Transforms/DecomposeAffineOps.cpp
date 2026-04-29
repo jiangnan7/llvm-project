@@ -14,10 +14,10 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Affine/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
+using namespace mlir::affine;
 
 #define DEBUG_TYPE "decompose-affine-ops"
 #define DBGS() (llvm::dbgs() << "[" DEBUG_TYPE "]: ")
@@ -38,8 +38,8 @@ static int64_t numEnclosingInvariantLoops(OpOperand &operand) {
   return count;
 }
 
-void mlir::reorderOperandsByHoistability(RewriterBase &rewriter,
-                                         AffineApplyOp op) {
+void mlir::affine::reorderOperandsByHoistability(RewriterBase &rewriter,
+                                                 AffineApplyOp op) {
   SmallVector<int64_t> numInvariant = llvm::to_vector(
       llvm::map_range(op->getOpOperands(), [&](OpOperand &operand) {
         return numEnclosingInvariantLoops(operand);
@@ -48,10 +48,9 @@ void mlir::reorderOperandsByHoistability(RewriterBase &rewriter,
   int64_t numOperands = op.getNumOperands();
   SmallVector<int64_t> operandPositions =
       llvm::to_vector(llvm::seq<int64_t>(0, numOperands));
-  std::sort(operandPositions.begin(), operandPositions.end(),
-            [&numInvariant](size_t i1, size_t i2) {
-              return numInvariant[i1] > numInvariant[i2];
-            });
+  llvm::stable_sort(operandPositions, [&numInvariant](size_t i1, size_t i2) {
+    return numInvariant[i1] > numInvariant[i2];
+  });
 
   SmallVector<AffineExpr> replacements(numOperands);
   SmallVector<Value> operands(numOperands);
@@ -71,10 +70,10 @@ void mlir::reorderOperandsByHoistability(RewriterBase &rewriter,
                        op->getContext());
   canonicalizeMapAndOperands(&map, &operands);
 
-  rewriter.startRootUpdate(op);
+  rewriter.startOpModification(op);
   op.setMap(map);
   op->setOperands(operands);
-  rewriter.finalizeRootUpdate(op);
+  rewriter.finalizeOpModification(op);
 }
 
 /// Build an affine.apply that is a subexpression `expr` of `originalOp`s affine
@@ -93,8 +92,8 @@ static AffineApplyOp createSubApply(RewriterBase &rewriter,
                                         rhsOperands);
 }
 
-FailureOr<AffineApplyOp> mlir::decompose(RewriterBase &rewriter,
-                                         AffineApplyOp op) {
+FailureOr<AffineApplyOp> mlir::affine::decompose(RewriterBase &rewriter,
+                                                 AffineApplyOp op) {
   // 1. Preconditions: only handle dimensionless AffineApplyOp maps with a
   // top-level binary expression that we can reassociate (i.e. add or mul).
   AffineMap m = op.getAffineMap();
@@ -102,12 +101,12 @@ FailureOr<AffineApplyOp> mlir::decompose(RewriterBase &rewriter,
     return rewriter.notifyMatchFailure(op, "expected no dims");
 
   AffineExpr remainingExp = m.getResult(0);
-  auto binExpr = remainingExp.dyn_cast<AffineBinaryOpExpr>();
+  auto binExpr = dyn_cast<AffineBinaryOpExpr>(remainingExp);
   if (!binExpr)
     return rewriter.notifyMatchFailure(op, "terminal affine.apply");
 
-  if (!binExpr.getLHS().isa<AffineBinaryOpExpr>() &&
-      !binExpr.getRHS().isa<AffineBinaryOpExpr>())
+  if (!isa<AffineBinaryOpExpr>(binExpr.getLHS()) &&
+      !isa<AffineBinaryOpExpr>(binExpr.getRHS()))
     return rewriter.notifyMatchFailure(op, "terminal affine.apply");
 
   bool supportedKind = ((binExpr.getKind() == AffineExprKind::Add) ||
@@ -123,7 +122,7 @@ FailureOr<AffineApplyOp> mlir::decompose(RewriterBase &rewriter,
   MLIRContext *ctx = op->getContext();
   SmallVector<AffineExpr> subExpressions;
   while (true) {
-    auto currentBinExpr = remainingExp.dyn_cast<AffineBinaryOpExpr>();
+    auto currentBinExpr = dyn_cast<AffineBinaryOpExpr>(remainingExp);
     if (!currentBinExpr || currentBinExpr.getKind() != binExpr.getKind()) {
       subExpressions.push_back(remainingExp);
       LLVM_DEBUG(DBGS() << "--terminal: " << subExpressions.back() << "\n");
@@ -144,10 +143,9 @@ FailureOr<AffineApplyOp> mlir::decompose(RewriterBase &rewriter,
         return i;
     return -1;
   };
-  std::sort(subExpressions.begin(), subExpressions.end(),
-            [&](AffineExpr e1, AffineExpr e2) {
-              return getMaxSymbol(e1) < getMaxSymbol(e2);
-            });
+  llvm::stable_sort(subExpressions, [&](AffineExpr e1, AffineExpr e2) {
+    return getMaxSymbol(e1) < getMaxSymbol(e2);
+  });
   LLVM_DEBUG(
       llvm::interleaveComma(subExpressions, DBGS() << "--sorted subexprs: ");
       llvm::dbgs() << "\n");

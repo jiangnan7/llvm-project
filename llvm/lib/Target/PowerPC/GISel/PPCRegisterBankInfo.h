@@ -11,8 +11,8 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_TARGET_PPC_GISEL_PPCREGISTERBANKINFO_H
-#define LLVM_LIB_TARGET_PPC_GISEL_PPCREGISTERBANKINFO_H
+#ifndef LLVM_LIB_TARGET_POWERPC_GISEL_PPCREGISTERBANKINFO_H
+#define LLVM_LIB_TARGET_POWERPC_GISEL_PPCREGISTERBANKINFO_H
 
 #include "llvm/CodeGen/RegisterBank.h"
 #include "llvm/CodeGen/RegisterBankInfo.h"
@@ -32,13 +32,14 @@ protected:
     PMI_GPR64 = 2,
     PMI_FPR32 = 3,
     PMI_FPR64 = 4,
-    PMI_CR = 5,
+    PMI_VEC128 = 5,
+    PMI_CR = 6,
     PMI_Min = PMI_GPR32,
   };
 
-  static RegisterBankInfo::PartialMapping PartMappings[];
-  static RegisterBankInfo::ValueMapping ValMappings[];
-  static PartialMappingIdx BankIDToCopyMapIdx[];
+  static const RegisterBankInfo::PartialMapping PartMappings[];
+  static const RegisterBankInfo::ValueMapping ValMappings[];
+  static const PartialMappingIdx BankIDToCopyMapIdx[];
 
   /// Get the pointer to the ValueMapping representing the RegisterBank
   /// at \p RBIdx.
@@ -66,6 +67,7 @@ public:
 
   const RegisterBank &getRegBankFromRegClass(const TargetRegisterClass &RC,
                                              LLT Ty) const override;
+
   const InstructionMapping &
   getInstrMapping(const MachineInstr &MI) const override;
 

@@ -6,14 +6,14 @@ declare { ptr, i1 } @llvm.type.checked.load(ptr, i32, metadata)
 
 ; A vtable with "relative pointers", slots don't contain pointers to implementations, but instead have an i32 offset from the vtable itself to the implementation.
 @vtable = internal unnamed_addr constant { [2 x i32] } { [2 x i32] [
-  i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc1_live              to i64), i64 ptrtoint (ptr @vtable to i64)) to i32),
-  i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc2_dead              to i64), i64 ptrtoint (ptr @vtable to i64)) to i32)
+  i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc1_live to i64), i64 ptrtoint (ptr @vtable to i64)) to i32),
+  i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc2_dead to i64), i64 ptrtoint (ptr @vtable to i64)) to i32)
 ]}, align 8, !type !0, !type !1, !vcall_visibility !{i64 2}
 !0 = !{i64 0, !"vfunc1.type"}
 !1 = !{i64 4, !"vfunc2.type"}
 
 ; CHECK:      @vtable = internal unnamed_addr constant { [2 x i32] } { [2 x i32] [
-; CHECK-SAME:   i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc1_live              to i64), i64 ptrtoint (ptr @vtable to i64)) to i32),
+; CHECK-SAME:   i32 trunc (i64 sub (i64 ptrtoint (ptr @vfunc1_live to i64), i64 ptrtoint (ptr @vtable to i64)) to i32),
 ; CHECK-SAME:   i32 0
 ; CHECK-SAME: ] }, align 8, !type !0, !type !1, !vcall_visibility !2
 

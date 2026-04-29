@@ -15,6 +15,7 @@
 #define LLVM_DEBUGINFO_LOGICALVIEW_CORE_LVLOCATION_H
 
 #include "llvm/DebugInfo/LogicalView/Core/LVObject.h"
+#include "llvm/Support/Compiler.h"
 
 namespace llvm {
 namespace logicalview {
@@ -33,33 +34,28 @@ class LVOperation final {
   //   OP_[GNU_]deref_type, OP_[GNU_]entry_value, OP_implicit_value,
   //   OP_[GNU_]implicit_pointer, OP_[GNU_]regval_type, OP_xderef_type.
   LVSmall Opcode = 0;
-  uint64_t Operands[2];
+  SmallVector<uint64_t> Operands;
 
 public:
   LVOperation() = delete;
-  LVOperation(LVSmall Opcode, LVUnsigned Operand1, LVUnsigned Operand2)
-      : Opcode(Opcode) {
-    Operands[0] = Operand1;
-    Operands[1] = Operand2;
-  }
+  LVOperation(LVSmall Opcode, ArrayRef<LVUnsigned> Operands)
+      : Opcode(Opcode), Operands(Operands) {}
   LVOperation(const LVOperation &) = delete;
   LVOperation &operator=(const LVOperation &) = delete;
   ~LVOperation() = default;
 
   LVSmall getOpcode() const { return Opcode; }
-  uint64_t getOperand1() const { return Operands[0]; }
-  uint64_t getOperand2() const { return Operands[1]; }
-  std::string getOperandsDWARFInfo();
-  std::string getOperandsCodeViewInfo();
+  LLVM_ABI std::string getOperandsDWARFInfo();
+  LLVM_ABI std::string getOperandsCodeViewInfo();
 
-  void print(raw_ostream &OS, bool Full = true) const;
+  LLVM_ABI void print(raw_ostream &OS, bool Full = true) const;
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-  void dump() { print(dbgs()); }
+  void dump() const { print(dbgs()); }
 #endif
 };
 
-class LVLocation : public LVObject {
+class LLVM_ABI LVLocation : public LVObject {
   enum class Property {
     IsAddressRange,
     IsBaseClassOffset,
@@ -154,8 +150,7 @@ public:
 
   virtual void addObject(LVAddress LowPC, LVAddress HighPC,
                          LVUnsigned SectionOffset, uint64_t LocDescOffset) {}
-  virtual void addObject(LVSmall Opcode, LVUnsigned Operand1,
-                         LVUnsigned Operand2) {}
+  virtual void addObject(LVSmall Opcode, ArrayRef<LVUnsigned> Operands) {}
 
   static void print(LVLocations *Locations, raw_ostream &OS, bool Full = true);
   void printInterval(raw_ostream &OS, bool Full = true) const;
@@ -164,13 +159,9 @@ public:
 
   void print(raw_ostream &OS, bool Full = true) const override;
   void printExtra(raw_ostream &OS, bool Full = true) const override;
-
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-  void dump() const override { print(dbgs()); }
-#endif
 };
 
-class LVLocationSymbol final : public LVLocation {
+class LLVM_ABI LVLocationSymbol final : public LVLocation {
   // Location descriptors for the active range.
   std::unique_ptr<LVOperations> Entries;
 
@@ -184,8 +175,7 @@ public:
 
   void addObject(LVAddress LowPC, LVAddress HighPC, LVUnsigned SectionOffset,
                  uint64_t LocDescOffset) override;
-  void addObject(LVSmall Opcode, LVUnsigned Operand1,
-                 LVUnsigned Operand2) override;
+  void addObject(LVSmall Opcode, ArrayRef<LVUnsigned> Operands) override;
 
   void printRawExtra(raw_ostream &OS, bool Full = true) const override;
   void printExtra(raw_ostream &OS, bool Full = true) const override;

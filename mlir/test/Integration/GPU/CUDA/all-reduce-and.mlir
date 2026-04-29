@@ -1,8 +1,15 @@
 // RUN: mlir-opt %s \
-// RUN: | mlir-opt -gpu-kernel-outlining \
-// RUN: | mlir-opt -pass-pipeline='builtin.module(gpu.module(strip-debuginfo,convert-gpu-to-nvvm,gpu-to-cubin))' \
-// RUN: | mlir-opt -gpu-to-llvm \
-// RUN: | mlir-cpu-runner \
+// RUN: | mlir-opt -gpu-lower-to-nvvm-pipeline \
+// RUN: | mlir-runner \
+// RUN:   --shared-libs=%mlir_cuda_runtime \
+// RUN:   --shared-libs=%mlir_runner_utils \
+// RUN:   --entry-point-result=void \
+// RUN: | FileCheck %s
+
+// Same as above but with the memref bare pointer lowering convention.
+// RUN: mlir-opt %s \
+// RUN: | mlir-opt -gpu-lower-to-nvvm-pipeline="kernel-bare-ptr-calling-convention=1 cubin-format=%gpu_compilation_format" \
+// RUN: | mlir-runner \
 // RUN:   --shared-libs=%mlir_cuda_runtime \
 // RUN:   --shared-libs=%mlir_runner_utils \
 // RUN:   --entry-point-result=void \
@@ -67,4 +74,3 @@ func.func @main() {
 }
 
 func.func private @printMemrefI32(memref<*xi32>)
-

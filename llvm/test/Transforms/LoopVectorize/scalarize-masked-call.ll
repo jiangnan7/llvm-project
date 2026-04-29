@@ -16,7 +16,7 @@ define void @cond_call(ptr readonly %src, ptr noalias %dest, i64 %N) {
 ; CHECK-NEXT:    [[INDEX:%.*]] = phi i64 [ 0, [[VECTOR_PH]] ], [ [[INDEX_NEXT:%.*]], [[PRED_CALL_CONTINUE2:%.*]] ]
 ; CHECK-NEXT:    [[TMP0:%.*]] = getelementptr inbounds i64, ptr [[SRC:%.*]], i64 [[INDEX]]
 ; CHECK-NEXT:    [[WIDE_LOAD:%.*]] = load <2 x i64>, ptr [[TMP0]], align 8
-; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult <2 x i64> [[WIDE_LOAD]], <i64 5, i64 5>
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult <2 x i64> [[WIDE_LOAD]], splat (i64 5)
 ; CHECK-NEXT:    [[TMP2:%.*]] = extractelement <2 x i1> [[TMP1]], i32 0
 ; CHECK-NEXT:    br i1 [[TMP2]], label [[PRED_CALL_IF:%.*]], label [[PRED_CALL_CONTINUE:%.*]]
 ; CHECK:       pred.call.if:

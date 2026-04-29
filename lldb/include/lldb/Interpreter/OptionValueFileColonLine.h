@@ -29,6 +29,8 @@ public:
   void DumpValue(const ExecutionContext *exe_ctx, Stream &strm,
                  uint32_t dump_mask) override;
 
+  llvm::json::Value ToJSON(const ExecutionContext *exe_ctx) const override;
+
   Status
   SetValueFromString(llvm::StringRef value,
                      VarSetOperationType op = eVarSetOperationAssign) override;
@@ -52,7 +54,7 @@ protected:
   FileSpec m_file_spec;
   uint32_t m_line_number = LLDB_INVALID_LINE_NUMBER;
   uint32_t m_column_number = LLDB_INVALID_COLUMN_NUMBER;
-  uint32_t m_completion_mask = CommandCompletions::eSourceFileCompletion;
+  uint32_t m_completion_mask = lldb::eSourceFileCompletion;
 };
 
 } // namespace lldb_private

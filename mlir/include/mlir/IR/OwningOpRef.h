@@ -13,6 +13,7 @@
 #ifndef MLIR_IR_OWNINGOPREF_H
 #define MLIR_IR_OWNINGOPREF_H
 
+#include <type_traits>
 #include <utility>
 
 namespace mlir {
@@ -49,7 +50,14 @@ public:
   /// Allow accessing the internal op.
   OpTy get() const { return op; }
   OpTy operator*() const { return op; }
-  OpTy *operator->() { return &op; }
+  auto operator->() {
+    // Specialize for the case where OpTy is a pointer, to allow using
+    // OwningOpRef<Operation*>.
+    if constexpr (std::is_pointer<OpTy>::value)
+      return op;
+    else
+      return &op;
+  }
   explicit operator bool() const { return op; }
 
   /// Downcast to generic operation.

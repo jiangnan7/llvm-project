@@ -1,4 +1,4 @@
-//=- RISCVRedundantCopyElimination.cpp - Remove useless copy for RISCV ------=//
+//=- RISCVRedundantCopyElimination.cpp - Remove useless copy for RISC-V -----=//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -44,19 +44,15 @@ class RISCVRedundantCopyElimination : public MachineFunctionPass {
 
 public:
   static char ID;
-  RISCVRedundantCopyElimination() : MachineFunctionPass(ID) {
-    initializeRISCVRedundantCopyEliminationPass(
-        *PassRegistry::getPassRegistry());
-  }
+  RISCVRedundantCopyElimination() : MachineFunctionPass(ID) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override;
   MachineFunctionProperties getRequiredProperties() const override {
-    return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::NoVRegs);
+    return MachineFunctionProperties().setNoVRegs();
   }
 
   StringRef getPassName() const override {
-    return "RISCV Redundant Copy Elimination";
+    return "RISC-V Redundant Copy Elimination";
   }
 
 private:
@@ -68,7 +64,7 @@ private:
 char RISCVRedundantCopyElimination::ID = 0;
 
 INITIALIZE_PASS(RISCVRedundantCopyElimination, "riscv-copyelim",
-                "RISCV redundant copy elimination pass", false, false)
+                "RISC-V Redundant Copy Elimination", false, false)
 
 static bool
 guaranteesZeroRegInBlock(MachineBasicBlock &MBB,
@@ -76,10 +72,12 @@ guaranteesZeroRegInBlock(MachineBasicBlock &MBB,
                          MachineBasicBlock *TBB) {
   assert(Cond.size() == 3 && "Unexpected number of operands");
   assert(TBB != nullptr && "Expected branch target basic block");
-  auto CC = static_cast<RISCVCC::CondCode>(Cond[0].getImm());
-  if (CC == RISCVCC::COND_EQ && Cond[2].getReg() == RISCV::X0 && TBB == &MBB)
+  auto Opc = Cond[0].getImm();
+  if (Opc == RISCV::BEQ && Cond[2].isReg() && Cond[2].getReg() == RISCV::X0 &&
+      TBB == &MBB)
     return true;
-  if (CC == RISCVCC::COND_NE && Cond[2].getReg() == RISCV::X0 && TBB != &MBB)
+  if (Opc == RISCV::BNE && Cond[2].isReg() && Cond[2].getReg() == RISCV::X0 &&
+      TBB != &MBB)
     return true;
   return false;
 }

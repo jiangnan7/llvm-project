@@ -9,7 +9,6 @@
 #include "llvm/ExecutionEngine/Orc/EPCGenericJITLinkMemoryManager.h"
 
 #include "llvm/ExecutionEngine/JITLink/JITLink.h"
-#include "llvm/ExecutionEngine/Orc/LookupAndRecordAddrs.h"
 #include "llvm/ExecutionEngine/Orc/Shared/OrcRTBridge.h"
 
 #include <limits>
@@ -158,7 +157,7 @@ void EPCGenericJITLinkMemoryManager::completeAllocation(
     auto &SegInfo = SegInfos[AG];
     SegInfo.ContentSize = Seg.ContentSize;
     SegInfo.ZeroFillSize = Seg.ZeroFillSize;
-    SegInfo.Addr = ExecutorAddr(Seg.Addr);
+    SegInfo.Addr = Seg.Addr;
     SegInfo.WorkingMem = Seg.WorkingMem;
   }
 

@@ -31,7 +31,7 @@ define i32 @add_const_add_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_add_const_add_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_add_const(
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 10, i32 10, i32 10, i32 10>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 10)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -41,9 +41,9 @@ define <4 x i32> @vec_add_const_add_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_add_const_add_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_add_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 8, i32 8, i32 8, i32 8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], <i32 10, i32 10, i32 10, i32 10>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], splat (i32 10)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -89,7 +89,7 @@ define i32 @add_const_sub_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_add_const_sub_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_sub_const(
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 6, i32 6, i32 6, i32 6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -99,9 +99,9 @@ define <4 x i32> @vec_add_const_sub_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_add_const_sub_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_sub_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 8, i32 8, i32 8, i32 8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], <i32 6, i32 6, i32 6, i32 6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], splat (i32 6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -132,6 +132,119 @@ define i32 @add_const_const_sub(i32 %arg) {
   ret i32 %t1
 }
 
+define i8 @add_nsw_const_const_sub_nsw(i8 %arg) {
+; CHECK-LABEL: @add_nsw_const_const_sub_nsw(
+; CHECK-NEXT:    [[T1:%.*]] = sub nsw i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add nsw i8 %arg, 1
+  %t1 = sub nsw i8 -127, %t0
+  ret i8 %t1
+}
+
+define i8 @add_nsw_const_const_sub(i8 %arg) {
+; CHECK-LABEL: @add_nsw_const_const_sub(
+; CHECK-NEXT:    [[T1:%.*]] = sub i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add nsw i8 %arg, 1
+  %t1 = sub i8 -127, %t0
+  ret i8 %t1
+}
+
+define i8 @add_const_const_sub_nsw(i8 %arg) {
+; CHECK-LABEL: @add_const_const_sub_nsw(
+; CHECK-NEXT:    [[T1:%.*]] = sub i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add i8 %arg, 1
+  %t1 = sub nsw i8 -127, %t0
+  ret i8 %t1
+}
+
+; 127-X with nsw will be more poisonous than -127-(X+2) with nsw. (see X = -1)
+define i8 @add_nsw_const_const_sub_nsw_ov(i8 %arg) {
+; CHECK-LABEL: @add_nsw_const_const_sub_nsw_ov(
+; CHECK-NEXT:    [[T1:%.*]] = sub i8 127, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add nsw i8 %arg, 2
+  %t1 = sub nsw i8 -127, %t0
+  ret i8 %t1
+}
+
+define i8 @add_nuw_const_const_sub_nuw(i8 %arg) {
+; CHECK-LABEL: @add_nuw_const_const_sub_nuw(
+; CHECK-NEXT:    [[T1:%.*]] = sub nuw i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add nuw i8 %arg, 1
+  %t1 = sub nuw i8 -127, %t0
+  ret i8 %t1
+}
+
+define i8 @add_nuw_const_const_sub(i8 %arg) {
+; CHECK-LABEL: @add_nuw_const_const_sub(
+; CHECK-NEXT:    [[T1:%.*]] = sub i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add nuw i8 %arg, 1
+  %t1 = sub i8 -127, %t0
+  ret i8 %t1
+}
+
+define i8 @add_const_const_sub_nuw(i8 %arg) {
+; CHECK-LABEL: @add_const_const_sub_nuw(
+; CHECK-NEXT:    [[T1:%.*]] = sub i8 -128, [[ARG:%.*]]
+; CHECK-NEXT:    ret i8 [[T1]]
+;
+  %t0 = add i8 %arg, 1
+  %t1 = sub nuw i8 -127, %t0
+  ret i8 %t1
+}
+
+define <2 x i8> @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov1(<2 x i8> %arg) {
+; CHECK-LABEL: @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov1(
+; CHECK-NEXT:    [[T1:%.*]] = sub nsw <2 x i8> <i8 -127, i8 -126>, [[ARG:%.*]]
+; CHECK-NEXT:    ret <2 x i8> [[T1]]
+;
+  %t0 = add nsw <2 x i8> %arg, <i8 2, i8 0>
+  %t1 = sub nsw <2 x i8> <i8 -125, i8 -126>, %t0
+  ret <2 x i8> %t1
+}
+
+define <2 x i8> @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov2(<2 x i8> %arg) {
+; CHECK-LABEL: @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov2(
+; CHECK-NEXT:    [[T1:%.*]] = sub nsw <2 x i8> <i8 -126, i8 -128>, [[ARG:%.*]]
+; CHECK-NEXT:    ret <2 x i8> [[T1]]
+;
+  %t0 = add nsw <2 x i8> %arg, <i8 1, i8 2>
+  %t1 = sub nsw <2 x i8> <i8 -125, i8 -126>, %t0
+  ret <2 x i8> %t1
+}
+
+define <2 x i8> @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov3(<2 x i8> %arg) {
+; CHECK-LABEL: @non_splat_vec_add_nsw_const_const_sub_nsw_not_ov3(
+; CHECK-NEXT:    [[T1:%.*]] = sub nsw <2 x i8> <i8 -120, i8 -127>, [[ARG:%.*]]
+; CHECK-NEXT:    ret <2 x i8> [[T1]]
+;
+  %t0 = add nsw <2 x i8> %arg, <i8 0, i8 1>
+  %t1 = sub nsw <2 x i8> <i8 -120, i8 -126>, %t0
+  ret <2 x i8> %t1
+}
+
+; 127-X with nsw will be more poisonous than -127-(X+2) with nsw. (see X = -1)
+define <2 x i8> @non_splat_vec_add_nsw_const_const_sub_nsw_ov(<2 x i8> %arg) {
+; CHECK-LABEL: @non_splat_vec_add_nsw_const_const_sub_nsw_ov(
+; CHECK-NEXT:    [[T1:%.*]] = sub <2 x i8> <i8 -127, i8 127>, [[ARG:%.*]]
+; CHECK-NEXT:    ret <2 x i8> [[T1]]
+;
+  %t0 = add nsw <2 x i8> %arg, <i8 1, i8 2>
+  %t1 = sub nsw <2 x i8> <i8 -126, i8 -127>, %t0
+  ret <2 x i8> %t1
+}
+
+
 define i32 @add_const_const_sub_extrause(i32 %arg) {
 ; CHECK-LABEL: @add_const_const_sub_extrause(
 ; CHECK-NEXT:    [[T0:%.*]] = add i32 [[ARG:%.*]], 8
@@ -147,7 +260,7 @@ define i32 @add_const_const_sub_extrause(i32 %arg) {
 
 define <4 x i32> @vec_add_const_const_sub(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_const_sub(
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 -6, i32 -6, i32 -6, i32 -6>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 -6), [[ARG:%.*]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -157,9 +270,9 @@ define <4 x i32> @vec_add_const_const_sub(<4 x i32> %arg) {
 
 define <4 x i32> @vec_add_const_const_sub_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_add_const_const_sub_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 8, i32 8, i32 8, i32 8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 -6, i32 -6, i32 -6, i32 -6>, [[ARG]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 -6), [[ARG]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = add <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -205,7 +318,7 @@ define i32 @sub_const_add_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_sub_const_add_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_add_const(
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -6, i32 -6, i32 -6, i32 -6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -215,9 +328,9 @@ define <4 x i32> @vec_sub_const_add_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_sub_const_add_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_add_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -8, i32 -8, i32 -8, i32 -8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], <i32 -6, i32 -6, i32 -6, i32 -6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], splat (i32 -6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -263,7 +376,7 @@ define i32 @sub_const_sub_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_sub_const_sub_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_sub_const(
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -10, i32 -10, i32 -10, i32 -10>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -10)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -273,9 +386,9 @@ define <4 x i32> @vec_sub_const_sub_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_sub_const_sub_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_sub_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -8, i32 -8, i32 -8, i32 -8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], <i32 -10, i32 -10, i32 -10, i32 -10>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], splat (i32 -10)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -321,7 +434,7 @@ define i32 @sub_const_const_sub_extrause(i32 %arg) {
 
 define <4 x i32> @vec_sub_const_const_sub(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_const_sub(
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 10, i32 10, i32 10, i32 10>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 10), [[ARG:%.*]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -331,9 +444,9 @@ define <4 x i32> @vec_sub_const_const_sub(<4 x i32> %arg) {
 
 define <4 x i32> @vec_sub_const_const_sub_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_sub_const_const_sub_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -8, i32 -8, i32 -8, i32 -8>
+; CHECK-NEXT:    [[T0:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -8)
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 10, i32 10, i32 10, i32 10>, [[ARG]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 10), [[ARG]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> %arg, <i32 8, i32 8, i32 8, i32 8>
@@ -379,7 +492,7 @@ define i32 @const_sub_add_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_const_sub_add_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_add_const(
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 10, i32 10, i32 10, i32 10>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 10), [[ARG:%.*]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg
@@ -389,9 +502,9 @@ define <4 x i32> @vec_const_sub_add_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_const_sub_add_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_add_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> splat (i32 8), [[ARG:%.*]]
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 10, i32 10, i32 10, i32 10>, [[ARG]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 10), [[ARG]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg
@@ -437,7 +550,7 @@ define i32 @const_sub_sub_const_extrause(i32 %arg) {
 
 define <4 x i32> @vec_const_sub_sub_const(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_sub_const(
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 6, i32 6, i32 6, i32 6>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 6), [[ARG:%.*]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg
@@ -447,9 +560,9 @@ define <4 x i32> @vec_const_sub_sub_const(<4 x i32> %arg) {
 
 define <4 x i32> @vec_const_sub_sub_const_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_sub_const_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> splat (i32 8), [[ARG:%.*]]
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> <i32 6, i32 6, i32 6, i32 6>, [[ARG]]
+; CHECK-NEXT:    [[T1:%.*]] = sub <4 x i32> splat (i32 6), [[ARG]]
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg
@@ -496,7 +609,7 @@ define i32 @const_sub_const_sub_extrause(i32 %arg) {
 
 define <4 x i32> @vec_const_sub_const_sub(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_const_sub(
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], <i32 -6, i32 -6, i32 -6, i32 -6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG:%.*]], splat (i32 -6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg
@@ -506,9 +619,9 @@ define <4 x i32> @vec_const_sub_const_sub(<4 x i32> %arg) {
 
 define <4 x i32> @vec_const_sub_const_sub_extrause(<4 x i32> %arg) {
 ; CHECK-LABEL: @vec_const_sub_const_sub_extrause(
-; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, [[ARG:%.*]]
+; CHECK-NEXT:    [[T0:%.*]] = sub <4 x i32> splat (i32 8), [[ARG:%.*]]
 ; CHECK-NEXT:    call void @vec_use(<4 x i32> [[T0]])
-; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], <i32 -6, i32 -6, i32 -6, i32 -6>
+; CHECK-NEXT:    [[T1:%.*]] = add <4 x i32> [[ARG]], splat (i32 -6)
 ; CHECK-NEXT:    ret <4 x i32> [[T1]]
 ;
   %t0 = sub <4 x i32> <i32 8, i32 8, i32 8, i32 8>, %arg

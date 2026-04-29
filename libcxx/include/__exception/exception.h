@@ -21,7 +21,7 @@
 #  pragma GCC system_header
 #endif
 
-namespace std { // purposefully not using versioning namespace
+_LIBCPP_BEGIN_UNVERSIONED_NAMESPACE_STD
 
 #if defined(_LIBCPP_ABI_VCRUNTIME) && (!defined(_HAS_EXCEPTIONS) || _HAS_EXCEPTIONS != 0)
 // The std::exception class was already included above, but we're explicit about this condition here for clarity.
@@ -69,23 +69,26 @@ public:
 // On all other platforms, we define our own std::exception and std::bad_exception types
 // regardless of whether exceptions are turned on as a language feature.
 
-class _LIBCPP_EXCEPTION_ABI exception {
+class _LIBCPP_EXPORTED_FROM_ABI exception {
 public:
   _LIBCPP_HIDE_FROM_ABI exception() _NOEXCEPT {}
-  _LIBCPP_HIDE_FROM_ABI exception(const exception&) _NOEXCEPT = default;
+  _LIBCPP_HIDE_FROM_ABI exception(const exception&) _NOEXCEPT            = default;
+  _LIBCPP_HIDE_FROM_ABI exception& operator=(const exception&) _NOEXCEPT = default;
 
   virtual ~exception() _NOEXCEPT;
   virtual const char* what() const _NOEXCEPT;
 };
 
-class _LIBCPP_EXCEPTION_ABI bad_exception : public exception {
+class _LIBCPP_EXPORTED_FROM_ABI bad_exception : public exception {
 public:
   _LIBCPP_HIDE_FROM_ABI bad_exception() _NOEXCEPT {}
+  _LIBCPP_HIDE_FROM_ABI bad_exception(const bad_exception&) _NOEXCEPT            = default;
+  _LIBCPP_HIDE_FROM_ABI bad_exception& operator=(const bad_exception&) _NOEXCEPT = default;
   ~bad_exception() _NOEXCEPT override;
   const char* what() const _NOEXCEPT override;
 };
 #endif // !_LIBCPP_ABI_VCRUNTIME
 
-} // namespace std
+_LIBCPP_END_UNVERSIONED_NAMESPACE_STD
 
 #endif // _LIBCPP___EXCEPTION_EXCEPTION_H

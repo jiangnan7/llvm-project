@@ -18,6 +18,7 @@ Basic Commands
    llc
    lli
    llvm-as
+   llvm-cgdata
    llvm-config
    llvm-cov
    llvm-cxxmap
@@ -36,6 +37,7 @@ Basic Commands
    llvm-otool
    llvm-profdata
    llvm-readobj
+   llvm-reduce
    llvm-stress
    llvm-symbolizer
    opt
@@ -85,6 +87,7 @@ Developer Tools
    llvm-exegesis
    llvm-ifs
    llvm-locstats
+   llvm-test-mustache-spec
    llvm-pdbutil
    llvm-profgen
    llvm-tli-checker
@@ -95,5 +98,4 @@ Remarks Tools
 .. toctree::
    :maxdepth: 1
 
-   llvm-remark-size-diff
    llvm-remarkutil

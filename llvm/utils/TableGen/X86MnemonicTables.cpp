@@ -11,9 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CodeGenInstruction.h"
-#include "CodeGenTarget.h"
-#include "TableGenBackends.h"
+#include "Common/CodeGenInstruction.h"
+#include "Common/CodeGenTarget.h"
 #include "X86RecognizableInstr.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
@@ -23,10 +22,10 @@ using namespace llvm;
 namespace {
 
 class X86MnemonicTablesEmitter {
-  CodeGenTarget Target;
+  const CodeGenTarget Target;
 
 public:
-  X86MnemonicTablesEmitter(RecordKeeper &R) : Target(R) {}
+  X86MnemonicTablesEmitter(const RecordKeeper &R) : Target(R) {}
 
   // Output X86 mnemonic tables.
   void run(raw_ostream &OS);
@@ -35,15 +34,13 @@ public:
 void X86MnemonicTablesEmitter::run(raw_ostream &OS) {
   emitSourceFileHeader("X86 Mnemonic tables", OS);
   OS << "namespace llvm {\nnamespace X86 {\n\n";
-  Record *AsmWriter = Target.getAsmWriter();
+  const Record *AsmWriter = Target.getAsmWriter();
   unsigned Variant = AsmWriter->getValueAsInt("Variant");
 
   // Hold all instructions grouped by mnemonic
   StringMap<SmallVector<const CodeGenInstruction *, 0>> MnemonicToCGInstrMap;
 
-  ArrayRef<const CodeGenInstruction *> NumberedInstructions =
-      Target.getInstructionsByEnumValue();
-  for (const CodeGenInstruction *I : NumberedInstructions) {
+  for (const CodeGenInstruction *I : Target.getInstructions()) {
     const Record *Def = I->TheDef;
     // Filter non-X86 instructions.
     if (!Def->isSubClassOf("X86Inst"))
@@ -88,8 +85,5 @@ void X86MnemonicTablesEmitter::run(raw_ostream &OS) {
 
 } // namespace
 
-namespace llvm {
-void EmitX86MnemonicTables(RecordKeeper &RK, raw_ostream &OS) {
-  X86MnemonicTablesEmitter(RK).run(OS);
-}
-} // namespace llvm
+static TableGen::Emitter::OptClass<X86MnemonicTablesEmitter>
+    X("gen-x86-mnemonic-tables", "Generate X86 mnemonic tables");

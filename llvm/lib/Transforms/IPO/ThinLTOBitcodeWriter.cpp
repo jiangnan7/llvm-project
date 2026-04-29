@@ -18,9 +18,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/InitializePasses.h"
 #include "llvm/Object/ModuleSymbolTable.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/IPO/FunctionAttrs.h"
@@ -125,7 +123,7 @@ void promoteTypeIds(Module &M, StringRef ModuleId) {
   };
 
   if (Function *TypeTestFunc =
-          M.getFunction(Intrinsic::getName(Intrinsic::type_test))) {
+          Intrinsic::getDeclarationIfExists(&M, Intrinsic::type_test)) {
     for (const Use &U : TypeTestFunc->uses()) {
       auto CI = cast<CallInst>(U.getUser());
       ExternalizeTypeId(CI, 1);
@@ -133,7 +131,7 @@ void promoteTypeIds(Module &M, StringRef ModuleId) {
   }
 
   if (Function *PublicTypeTestFunc =
-          M.getFunction(Intrinsic::getName(Intrinsic::public_type_test))) {
+          Intrinsic::getDeclarationIfExists(&M, Intrinsic::public_type_test)) {
     for (const Use &U : PublicTypeTestFunc->uses()) {
       auto CI = cast<CallInst>(U.getUser());
       ExternalizeTypeId(CI, 1);
@@ -141,8 +139,16 @@ void promoteTypeIds(Module &M, StringRef ModuleId) {
   }
 
   if (Function *TypeCheckedLoadFunc =
-          M.getFunction(Intrinsic::getName(Intrinsic::type_checked_load))) {
+          Intrinsic::getDeclarationIfExists(&M, Intrinsic::type_checked_load)) {
     for (const Use &U : TypeCheckedLoadFunc->uses()) {
+      auto CI = cast<CallInst>(U.getUser());
+      ExternalizeTypeId(CI, 2);
+    }
+  }
+
+  if (Function *TypeCheckedLoadRelativeFunc = Intrinsic::getDeclarationIfExists(
+          &M, Intrinsic::type_checked_load_relative)) {
+    for (const Use &U : TypeCheckedLoadRelativeFunc->uses()) {
       auto CI = cast<CallInst>(U.getUser());
       ExternalizeTypeId(CI, 2);
     }
@@ -180,7 +186,7 @@ void simplifyExternals(Module &M) {
 
     if (!F.isDeclaration() || F.getFunctionType() == EmptyFT ||
         // Changing the type of an intrinsic may invalidate the IR.
-        F.getName().startswith("llvm."))
+        F.getName().starts_with("llvm."))
       continue;
 
     Function *NewF =
@@ -192,8 +198,15 @@ void simplifyExternals(Module &M) {
                                            AttributeList::FunctionIndex,
                                            F.getAttributes().getFnAttrs()));
     NewF->takeName(&F);
-    F.replaceAllUsesWith(ConstantExpr::getBitCast(NewF, F.getType()));
+    F.replaceAllUsesWith(NewF);
     F.eraseFromParent();
+  }
+
+  for (GlobalIFunc &I : llvm::make_early_inc_range(M.ifuncs())) {
+    if (I.use_empty())
+      I.eraseFromParent();
+    else
+      assert(I.getResolverFunction() && "ifunc misses its resolver function");
   }
 
   for (GlobalVariable &GV : llvm::make_early_inc_range(M.globals())) {
@@ -246,26 +259,39 @@ static void cloneUsedGlobalVariables(const Module &SrcM, Module &DestM,
     appendToUsed(DestM, NewUsed);
 }
 
+#ifndef NDEBUG
+static bool enableUnifiedLTO(Module &M) {
+  bool UnifiedLTO = false;
+  if (auto *MD =
+          mdconst::extract_or_null<ConstantInt>(M.getModuleFlag("UnifiedLTO")))
+    UnifiedLTO = MD->getZExtValue();
+  return UnifiedLTO;
+}
+#endif
+
 // If it's possible to split M into regular and thin LTO parts, do so and write
 // a multi-module bitcode file with the two parts to OS. Otherwise, write only a
 // regular LTO bitcode file to OS.
 void splitAndWriteThinLTOBitcode(
     raw_ostream &OS, raw_ostream *ThinLinkOS,
-    function_ref<AAResults &(Function &)> AARGetter, Module &M) {
+    function_ref<AAResults &(Function &)> AARGetter, Module &M,
+    const bool ShouldPreserveUseListOrder) {
   std::string ModuleId = getUniqueModuleId(&M);
   if (ModuleId.empty()) {
+    assert(!enableUnifiedLTO(M));
     // We couldn't generate a module ID for this module, write it out as a
     // regular LTO module with an index for summary-based dead stripping.
     ProfileSummaryInfo PSI(M);
     M.addModuleFlag(Module::Error, "ThinLTO", uint32_t(0));
     ModuleSummaryIndex Index = buildModuleSummaryIndex(M, nullptr, &PSI);
-    WriteBitcodeToFile(M, OS, /*ShouldPreserveUseListOrder=*/false, &Index);
+    WriteBitcodeToFile(M, OS, ShouldPreserveUseListOrder, &Index,
+                       /*UnifiedLTO=*/false);
 
     if (ThinLinkOS)
       // We don't have a ThinLTO part, but still write the module to the
       // ThinLinkOS if requested so that the expected output file is produced.
-      WriteBitcodeToFile(M, *ThinLinkOS, /*ShouldPreserveUseListOrder=*/false,
-                         &Index);
+      WriteBitcodeToFile(M, *ThinLinkOS, ShouldPreserveUseListOrder, &Index,
+                         /*UnifiedLTO=*/false);
 
     return;
   }
@@ -304,7 +330,7 @@ void splitAndWriteThinLTOBitcode(
   // comdat in MergedM to keep the comdat together.
   DenseSet<const Comdat *> MergedMComdats;
   for (GlobalVariable &GV : M.globals())
-    if (HasTypeMetadata(&GV)) {
+    if (!GV.isDeclaration() && HasTypeMetadata(&GV)) {
       if (const auto *C = GV.getComdat())
         MergedMComdats.insert(C);
       forEachVirtualFunction(GV.getInitializer(), [&](Function *F) {
@@ -324,12 +350,20 @@ void splitAndWriteThinLTOBitcode(
       });
     }
 
+  auto MustEmitToMergedModule = [](const GlobalValue *GV) {
+    // The __cfi_check definition is filled in by the CrossDSOCFI pass which
+    // runs only in the merged module.
+    return GV->getName() == "__cfi_check";
+  };
+
   ValueToValueMapTy VMap;
   std::unique_ptr<Module> MergedM(
       CloneModule(M, VMap, [&](const GlobalValue *GV) -> bool {
         if (const auto *C = GV->getComdat())
           if (MergedMComdats.count(C))
             return true;
+        if (MustEmitToMergedModule(GV))
+          return true;
         if (auto *F = dyn_cast<Function>(GV))
           return EligibleVirtualFns.count(F);
         if (auto *GVar =
@@ -346,7 +380,7 @@ void splitAndWriteThinLTOBitcode(
   cloneUsedGlobalVariables(M, *MergedM, /*CompilerUsed*/ true);
 
   for (Function &F : *MergedM)
-    if (!F.isDeclaration()) {
+    if (!F.isDeclaration() && !MustEmitToMergedModule(&F)) {
       // Reset the linkage of all functions eligible for virtual constant
       // propagation. The canonical definitions live in the thin LTO module so
       // that they can be imported.
@@ -368,6 +402,8 @@ void splitAndWriteThinLTOBitcode(
     if (const auto *C = GV->getComdat())
       if (MergedMComdats.count(C))
         return false;
+    if (MustEmitToMergedModule(GV))
+      return false;
     return true;
   });
 
@@ -462,9 +498,9 @@ void splitAndWriteThinLTOBitcode(
   // be used in the backends, and use that in the minimized bitcode
   // produced for the full link.
   ModuleHash ModHash = {{0}};
-  W.writeModule(M, /*ShouldPreserveUseListOrder=*/false, &Index,
+  W.writeModule(M, ShouldPreserveUseListOrder, &Index,
                 /*GenerateHash=*/true, &ModHash);
-  W.writeModule(*MergedM, /*ShouldPreserveUseListOrder=*/false, &MergedMIndex);
+  W.writeModule(*MergedM, ShouldPreserveUseListOrder, &MergedMIndex);
   W.writeSymtab();
   W.writeStrtab();
   OS << Buffer;
@@ -503,15 +539,19 @@ bool hasTypeMetadata(Module &M) {
   return false;
 }
 
-void writeThinLTOBitcode(raw_ostream &OS, raw_ostream *ThinLinkOS,
+bool writeThinLTOBitcode(raw_ostream &OS, raw_ostream *ThinLinkOS,
                          function_ref<AAResults &(Function &)> AARGetter,
-                         Module &M, const ModuleSummaryIndex *Index) {
+                         Module &M, const ModuleSummaryIndex *Index,
+                         const bool ShouldPreserveUseListOrder) {
   std::unique_ptr<ModuleSummaryIndex> NewIndex = nullptr;
   // See if this module has any type metadata. If so, we try to split it
   // or at least promote type ids to enable WPD.
   if (hasTypeMetadata(M)) {
-    if (enableSplitLTOUnit(M))
-      return splitAndWriteThinLTOBitcode(OS, ThinLinkOS, AARGetter, M);
+    if (enableSplitLTOUnit(M)) {
+      splitAndWriteThinLTOBitcode(OS, ThinLinkOS, AARGetter, M,
+                                  ShouldPreserveUseListOrder);
+      return true;
+    }
     // Promote type ids as needed for index-based WPD.
     std::string ModuleId = getUniqueModuleId(&M);
     if (!ModuleId.empty()) {
@@ -537,13 +577,14 @@ void writeThinLTOBitcode(raw_ostream &OS, raw_ostream *ThinLinkOS,
   // be used in the backends, and use that in the minimized bitcode
   // produced for the full link.
   ModuleHash ModHash = {{0}};
-  WriteBitcodeToFile(M, OS, /*ShouldPreserveUseListOrder=*/false, Index,
+  WriteBitcodeToFile(M, OS, ShouldPreserveUseListOrder, Index,
                      /*GenerateHash=*/true, &ModHash);
   // If a minimized bitcode module was requested for the thin link, only
   // the information that is needed by thin link will be written in the
   // given OS.
   if (ThinLinkOS && Index)
     writeThinLinkBitcodeToFile(M, *ThinLinkOS, *Index, ModHash);
+  return false;
 }
 
 } // anonymous namespace
@@ -552,10 +593,16 @@ PreservedAnalyses
 llvm::ThinLTOBitcodeWriterPass::run(Module &M, ModuleAnalysisManager &AM) {
   FunctionAnalysisManager &FAM =
       AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
-  writeThinLTOBitcode(OS, ThinLinkOS,
-                      [&FAM](Function &F) -> AAResults & {
-                        return FAM.getResult<AAManager>(F);
-                      },
-                      M, &AM.getResult<ModuleSummaryIndexAnalysis>(M));
-  return PreservedAnalyses::all();
+
+  M.removeDebugIntrinsicDeclarations();
+
+  bool Changed = writeThinLTOBitcode(
+      OS, ThinLinkOS,
+      [&FAM](Function &F) -> AAResults & {
+        return FAM.getResult<AAManager>(F);
+      },
+      M, &AM.getResult<ModuleSummaryIndexAnalysis>(M),
+      ShouldPreserveUseListOrder);
+
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }

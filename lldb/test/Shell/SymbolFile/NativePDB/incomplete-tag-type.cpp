@@ -4,19 +4,16 @@
 // RUN: %clang_cl --target=x86_64-windows-msvc -c /Fo%t1.obj -- %p/Inputs/incomplete-tag-type.cpp
 // RUN: %clang_cl --target=x86_64-windows-msvc /O1 /Z7 -c /Fo%t2.obj -- %s
 // RUN: lld-link /debug:full /nodefaultlib /entry:main %t1.obj %t2.obj /out:%t.exe /pdb:%t.pdb
-// RUN: env LLDB_USE_NATIVE_PDB_READER=1 %lldb -f %t.exe -o \
+// RUN: %lldb -f %t.exe -o \
 // RUN:   "settings set interpreter.stop-command-source-on-error false" \
-// RUN:   -o "p b" -o "p d" -o "p static_e_ref" -o "exit" 2>&1 | FileCheck %s
+// RUN:   -o "expression b" -o "expression d" -o "expression static_e_ref" -o "exit" 2>&1 | FileCheck %s
 
-// CHECK: (lldb) p b
+// CHECK: (lldb) expression b
 // CHECK: (B) $0 = {}
-// CHECK: (lldb) p d
+// CHECK: (lldb) expression d
 // CHECK: (D) $1 = {}
-// CHECK: (lldb) p static_e_ref
-// CHECK: error: expression failed to parse:
-// CHECK: error: {{.*}}: incomplete type 'E' where a complete type is required
-// CHECK: static_e_ref
-// CHECK: ^
+// CHECK: (lldb) expression static_e_ref
+// CHECK: error:{{.*}}incomplete type 'E' where a complete type is required
 
 // Complete base class.
 struct A { int x; A(); };

@@ -27,9 +27,8 @@ int test_i32(char *fmt, ...) {
 // N32:   %va = alloca ptr, align [[$PTRALIGN:4]]
 // N64:   %va = alloca ptr, align [[$PTRALIGN:8]]
 // ALL:   [[V:%.*]] = alloca i32, align 4
-// NEW:   [[PROMOTION_TEMP:%.*]] = alloca i32, align 4
 //
-// ALL:   call void @llvm.va_start(ptr %va)
+// ALL:   call void @llvm.va_start.p0(ptr %va)
 // ALL:   [[AP_CUR:%.+]] = load ptr, ptr %va, align [[$PTRALIGN]]
 // O32:   [[AP_NEXT:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], [[$INTPTR_T:i32]] [[$CHUNKSIZE:4]]
 // NEW:   [[AP_NEXT:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], [[$INTPTR_T:i32|i64]] [[$CHUNKSIZE:8]]
@@ -40,12 +39,10 @@ int test_i32(char *fmt, ...) {
 //
 // N32:   [[TMP:%.+]] = load i64, ptr [[AP_CUR]], align [[CHUNKALIGN:8]]
 // N64:   [[TMP:%.+]] = load i64, ptr [[AP_CUR]], align [[CHUNKALIGN:8]]
-// NEW:   [[TMP2:%.+]] = trunc i64 [[TMP]] to i32
-// NEW:   store i32 [[TMP2]], ptr [[PROMOTION_TEMP]], align 4
-// NEW:   [[ARG:%.+]] = load i32, ptr [[PROMOTION_TEMP]], align 4
+// NEW:   [[ARG:%.+]] = trunc i64 [[TMP]] to i32
 // ALL:   store i32 [[ARG]], ptr [[V]], align 4
 //
-// ALL:   call void @llvm.va_end(ptr %va)
+// ALL:   call void @llvm.va_end.p0(ptr %va)
 // ALL: }
 
 long long test_i64(char *fmt, ...) {
@@ -61,22 +58,20 @@ long long test_i64(char *fmt, ...) {
 // ALL-LABEL: define{{.*}} i64 @test_i64(ptr{{.*}} %fmt, ...)
 //
 // ALL:   %va = alloca ptr, align [[$PTRALIGN]]
-// ALL:   call void @llvm.va_start(ptr %va)
+// ALL:   call void @llvm.va_start.p0(ptr %va)
 // ALL:   [[AP_CUR:%.+]] = load ptr, ptr %va, align [[$PTRALIGN]]
 //
 // i64 is 8-byte aligned, while this is within O32's stack alignment there's no
 // guarantee that the offset is still 8-byte aligned after earlier reads.
-// O32:   [[TMP1:%.+]] = ptrtoint ptr [[AP_CUR]] to i32
-// O32:   [[TMP2:%.+]] = add i32 [[TMP1]], 7
-// O32:   [[TMP3:%.+]] = and i32 [[TMP2]], -8
-// O32:   [[AP_CUR:%.+]] = inttoptr i32 [[TMP3]] to ptr
+// O32:   [[TMP1:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], i32 7
+// O32:   [[AP_CUR:%.+]] = call ptr @llvm.ptrmask.p0.i32(ptr [[TMP1]], i32 -8)
 //
 // ALL:   [[AP_NEXT:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], [[$INTPTR_T]] 8
 // ALL:   store ptr [[AP_NEXT]], ptr %va, align [[$PTRALIGN]]
 //
 // ALL:   [[ARG:%.+]] = load i64, ptr [[AP_CUR]], align 8
 //
-// ALL:   call void @llvm.va_end(ptr %va)
+// ALL:   call void @llvm.va_end.p0(ptr %va)
 // ALL: }
 
 char *test_ptr(char *fmt, ...) {
@@ -93,8 +88,7 @@ char *test_ptr(char *fmt, ...) {
 //
 // ALL:   %va = alloca ptr, align [[$PTRALIGN]]
 // ALL:   [[V:%.*]] = alloca ptr, align [[$PTRALIGN]]
-// N32:   [[AP_CAST:%.+]] = alloca ptr, align 4
-// ALL:   call void @llvm.va_start(ptr %va)
+// ALL:   call void @llvm.va_start.p0(ptr %va)
 // ALL:   [[AP_CUR:%.+]] = load ptr, ptr %va, align [[$PTRALIGN]]
 // ALL:   [[AP_NEXT:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], [[$INTPTR_T]] [[$CHUNKSIZE]]
 // ALL:   store ptr [[AP_NEXT]], ptr %va, align [[$PTRALIGN]]
@@ -104,14 +98,11 @@ char *test_ptr(char *fmt, ...) {
 // N32:   [[TMP2:%.+]] = load i64, ptr [[AP_CUR]], align 8
 // N32:   [[TMP3:%.+]] = trunc i64 [[TMP2]] to i32
 // N32:   [[PTR:%.+]] = inttoptr i32 [[TMP3]] to ptr
-// N32:   store ptr [[PTR]], ptr [[AP_CAST]], align 4
-// N32:   [[ARG:%.+]] = load ptr, ptr [[AP_CAST]], align [[$PTRALIGN]]
+// O32:   [[PTR:%.+]] = load ptr, ptr [[AP_CUR]], align [[$PTRALIGN]]
+// N64:   [[PTR:%.+]] = load ptr, ptr [[AP_CUR]], align [[$PTRALIGN]]
+// ALL:   store ptr [[PTR]], ptr [[V]], align [[$PTRALIGN]]
 //
-// O32:   [[ARG:%.+]] = load ptr, ptr [[AP_CUR]], align [[$PTRALIGN]]
-// N64:   [[ARG:%.+]] = load ptr, ptr [[AP_CUR]], align [[$PTRALIGN]]
-// ALL:   store ptr [[ARG]], ptr [[V]], align [[$PTRALIGN]]
-//
-// ALL:   call void @llvm.va_end(ptr %va)
+// ALL:   call void @llvm.va_end.p0(ptr %va)
 // ALL: }
 
 int test_v4i32(char *fmt, ...) {
@@ -130,20 +121,21 @@ int test_v4i32(char *fmt, ...) {
 //
 // ALL:   %va = alloca ptr, align [[$PTRALIGN]]
 // ALL:   [[V:%.+]] = alloca <4 x i32>, align 16
-// ALL:   call void @llvm.va_start(ptr %va)
+// ALL:   call void @llvm.va_start.p0(ptr %va)
 // ALL:   [[AP_CUR:%.+]] = load ptr, ptr %va, align [[$PTRALIGN]]
 //
 // Vectors are 16-byte aligned, however the O32 ABI has a maximum alignment of
 // 8-bytes since the base of the stack is 8-byte aligned.
-// O32:   [[TMP1:%.+]] = ptrtoint ptr [[AP_CUR]] to i32
-// O32:   [[TMP2:%.+]] = add i32 [[TMP1]], 7
-// O32:   [[TMP3:%.+]] = and i32 [[TMP2]], -8
-// O32:   [[AP_CUR:%.+]] = inttoptr i32 [[TMP3]] to ptr
-//
-// NEW:   [[TMP1:%.+]] = ptrtoint ptr [[AP_CUR]] to [[$INTPTR_T]]
-// NEW:   [[TMP2:%.+]] = add [[$INTPTR_T]] [[TMP1]], 15
-// NEW:   [[TMP3:%.+]] = and [[$INTPTR_T]] [[TMP2]], -16
-// NEW:   [[AP_CUR:%.+]] = inttoptr [[$INTPTR_T]] [[TMP3]] to ptr
+
+// O32:   [[TMP1:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], i32 7
+// O32:   [[AP_CUR:%.+]] = call ptr @llvm.ptrmask.p0.i32(ptr [[TMP1]], i32 -8)
+
+// N32:   [[TMP1:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], i32 15
+// N32:   [[AP_CUR:%.+]] = call ptr @llvm.ptrmask.p0.i32(ptr [[TMP1]], i32 -16)
+
+// N64:   [[TMP1:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], i32 15
+// N64:   [[AP_CUR:%.+]] = call ptr @llvm.ptrmask.p0.i64(ptr [[TMP1]], i64 -16)
+
 //
 // ALL:   [[AP_NEXT:%.+]] = getelementptr inbounds i8, ptr [[AP_CUR]], [[$INTPTR_T]] 16
 // ALL:   store ptr [[AP_NEXT]], ptr %va, align [[$PTRALIGN]]
@@ -153,7 +145,7 @@ int test_v4i32(char *fmt, ...) {
 // N32:   [[ARG:%.+]] = load <4 x i32>, ptr [[AP_CUR]], align 16
 // ALL:   store <4 x i32> [[ARG]], ptr [[V]], align 16
 //
-// ALL:   call void @llvm.va_end(ptr %va)
+// ALL:   call void @llvm.va_end.p0(ptr %va)
 // ALL:   [[VECEXT:%.+]] = extractelement <4 x i32> {{.*}}, i32 0
 // ALL:   ret i32 [[VECEXT]]
 // ALL: }

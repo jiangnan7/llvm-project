@@ -43,14 +43,11 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/Value.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/ProfileData/InstrProf.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstddef>
@@ -353,7 +350,7 @@ bool AggressiveDeadCodeElimination::isInstrumentsConstant(Instruction &I) {
   // TODO -- move this test into llvm::isInstructionTriviallyDead
   if (CallInst *CI = dyn_cast<CallInst>(&I))
     if (Function *Callee = CI->getCalledFunction())
-      if (Callee->getName().equals(getInstrProfValueProfFuncName()))
+      if (Callee->getName() == getInstrProfValueProfFuncName())
         if (isa<Constant>(CI->getArgOperand(0)))
           return true;
   return false;
@@ -488,10 +485,8 @@ void AggressiveDeadCodeElimination::markLiveBranchesFromControlDependences() {
   // which currently have dead terminators that are control
   // dependence sources of a block which is in NewLiveBlocks.
 
-  const SmallPtrSet<BasicBlock *, 16> BWDT{
-      BlocksWithDeadTerminators.begin(),
-      BlocksWithDeadTerminators.end()
-  };
+  const SmallPtrSet<BasicBlock *, 16> BWDT(llvm::from_range,
+                                           BlocksWithDeadTerminators);
   SmallVector<BasicBlock *, 32> IDFBlocks;
   ReverseIDFCalculator IDFs(PDT);
   IDFs.setDefiningBlocks(NewLiveBlocks);
@@ -547,24 +542,27 @@ ADCEChanged AggressiveDeadCodeElimination::removeDeadInstructions() {
   // value of the function, and may therefore be deleted safely.
   // NOTE: We reuse the Worklist vector here for memory efficiency.
   for (Instruction &I : llvm::reverse(instructions(F))) {
+    // With "RemoveDIs" debug-info stored in DbgVariableRecord objects,
+    // debug-info attached to this instruction, and drop any for scopes that
+    // aren't alive, like the rest of this loop does. Extending support to
+    // assignment tracking is future work.
+    for (DbgRecord &DR : make_early_inc_range(I.getDbgRecordRange())) {
+      // Avoid removing a DVR that is linked to instructions because it holds
+      // information about an existing store.
+      if (DbgVariableRecord *DVR = dyn_cast<DbgVariableRecord>(&DR);
+          DVR && DVR->isDbgAssign())
+        if (!at::getAssignmentInsts(DVR).empty())
+          continue;
+      if (AliveScopes.count(DR.getDebugLoc()->getScope()))
+        continue;
+      I.dropOneDbgRecord(&DR);
+    }
+
     // Check if the instruction is alive.
     if (isLive(&I))
       continue;
 
-    if (auto *DII = dyn_cast<DbgInfoIntrinsic>(&I)) {
-      // Avoid removing a dbg.assign that is linked to instructions because it
-      // holds information about an existing store.
-      if (auto *DAI = dyn_cast<DbgAssignIntrinsic>(DII))
-        if (!at::getAssignmentInsts(DAI).empty())
-          continue;
-      // Check if the scope of this variable location is alive.
-      if (AliveScopes.count(DII->getDebugLoc()->getScope()))
-        continue;
-
-      // Fallthrough and drop the intrinsic.
-    } else {
-      Changed.ChangedNonDebugInstr = true;
-    }
+    Changed.ChangedNonDebugInstr = true;
 
     // Prepare to delete.
     Worklist.push_back(&I);

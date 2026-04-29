@@ -34,7 +34,7 @@ void test2(void) {
 
 // CHECK-LABEL: define{{.*}} void @test3
 void test3(void) {
-  // CHECK:     = call ptr @__strcpy_chk(ptr getelementptr inbounds ([63 x i8], ptr @gbuf, i64 1, i64 37), ptr @.str, i64 0)
+  // CHECK:     = call ptr @__strcpy_chk(ptr getelementptr inbounds ([63 x i8], ptr @gbuf, i64 0, i64 100), ptr @.str, i64 0)
   strcpy(&gbuf[100], "Hi there");
 }
 
@@ -525,6 +525,52 @@ void test31(void) {
   gi = OBJECT_SIZE_BUILTIN(&dsv[9].snd[0], 1);
 }
 
+// CHECK-LABEL: @test32
+static struct DynStructVar D32 = {
+  .fst = {},
+  .snd = { 0, 1, 2, },
+};
+unsigned long test32(void) {
+  // CHECK: ret i64 19
+  return OBJECT_SIZE_BUILTIN(&D32, 1);
+}
+// CHECK-LABEL: @test33
+static struct DynStructVar D33 = {
+  .fst = {},
+  .snd = {},
+};
+unsigned long test33(void) {
+  // CHECK: ret i64 16
+  return OBJECT_SIZE_BUILTIN(&D33, 1);
+}
+// CHECK-LABEL: @test34
+static struct DynStructVar D34 = {
+  .fst = {},
+};
+unsigned long test34(void) {
+  // CHECK: ret i64 16
+  return OBJECT_SIZE_BUILTIN(&D34, 1);
+}
+// CHECK-LABEL: @test35
+unsigned long test35(void) {
+  // CHECK: ret i64 16
+  return OBJECT_SIZE_BUILTIN(&(struct DynStructVar){}, 1);
+}
+extern void *memset (void *s, int c, unsigned long n);
+void test36(void) {
+  struct DynStructVar D;
+  // FORTIFY will check the object size of D. Test this doesn't assert when
+  // given a struct with a flexible array member that lacks an initializer.
+  memset(&D, 0, sizeof(D));
+}
+// CHECK-LABEL: @test37
+struct Z { struct A { int x, y[]; } z; int a; int b[]; };
+static struct Z my_z = { .b = {1,2,3} };
+unsigned long test37 (void) {
+  // CHECK: ret i64 4
+  return OBJECT_SIZE_BUILTIN(&my_z.z, 1);
+}
+
 // CHECK-LABEL: @PR30346
 void PR30346(void) {
   struct sa_family_t {};
@@ -546,7 +592,7 @@ void PR30346(void) {
 
 extern char incomplete_char_array[];
 // CHECK-LABEL: @incomplete_and_function_types
-int incomplete_and_function_types(void) {
+void incomplete_and_function_types(void) {
   // CHECK: call i64 @llvm.objectsize.i64.p0
   gi = OBJECT_SIZE_BUILTIN(incomplete_char_array, 0);
   // CHECK: call i64 @llvm.objectsize.i64.p0

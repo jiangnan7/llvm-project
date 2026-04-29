@@ -9,6 +9,7 @@
 #ifndef LLVM_TEXTAPI_TARGET_H
 #define LLVM_TEXTAPI_TARGET_H
 
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/VersionTuple.h"
 #include "llvm/TargetParser/Triple.h"
@@ -33,11 +34,11 @@ public:
       : Arch(Arch), Platform(Platform), MinDeployment(MinDeployment) {}
   explicit Target(const llvm::Triple &Triple)
       : Arch(mapToArchitecture(Triple)), Platform(mapToPlatformType(Triple)),
-        MinDeployment(Triple.getOSVersion()) {}
+        MinDeployment(mapToSupportedOSVersion(Triple)) {}
 
-  static llvm::Expected<Target> create(StringRef Target);
+  LLVM_ABI static llvm::Expected<Target> create(StringRef Target);
 
-  operator std::string() const;
+  LLVM_ABI operator std::string() const;
 
   Architecture Arch;
   PlatformType Platform;
@@ -45,14 +46,16 @@ public:
 };
 
 inline bool operator==(const Target &LHS, const Target &RHS) {
+  // In most cases the deployment version is not useful to compare.
   return std::tie(LHS.Arch, LHS.Platform) == std::tie(RHS.Arch, RHS.Platform);
 }
 
 inline bool operator!=(const Target &LHS, const Target &RHS) {
-  return std::tie(LHS.Arch, LHS.Platform) != std::tie(RHS.Arch, RHS.Platform);
+  return !(LHS == RHS);
 }
 
 inline bool operator<(const Target &LHS, const Target &RHS) {
+  // In most cases the deployment version is not useful to compare.
   return std::tie(LHS.Arch, LHS.Platform) < std::tie(RHS.Arch, RHS.Platform);
 }
 
@@ -64,12 +67,13 @@ inline bool operator!=(const Target &LHS, const Architecture &RHS) {
   return LHS.Arch != RHS;
 }
 
-PlatformSet mapToPlatformSet(ArrayRef<Target> Targets);
-ArchitectureSet mapToArchitectureSet(ArrayRef<Target> Targets);
+LLVM_ABI PlatformVersionSet mapToPlatformVersionSet(ArrayRef<Target> Targets);
+LLVM_ABI PlatformSet mapToPlatformSet(ArrayRef<Target> Targets);
+LLVM_ABI ArchitectureSet mapToArchitectureSet(ArrayRef<Target> Targets);
 
-std::string getTargetTripleName(const Target &Targ);
+LLVM_ABI std::string getTargetTripleName(const Target &Targ);
 
-raw_ostream &operator<<(raw_ostream &OS, const Target &Target);
+LLVM_ABI raw_ostream &operator<<(raw_ostream &OS, const Target &Target);
 
 } // namespace MachO
 } // namespace llvm

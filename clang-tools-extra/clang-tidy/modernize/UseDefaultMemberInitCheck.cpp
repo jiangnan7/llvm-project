@@ -159,6 +159,13 @@ static bool sameValue(const Expr *E1, const Expr *E2) {
   case Stmt::UnaryOperatorClass:
     return sameValue(cast<UnaryOperator>(E1)->getSubExpr(),
                      cast<UnaryOperator>(E2)->getSubExpr());
+  case Stmt::BinaryOperatorClass: {
+    const auto *BinOp1 = cast<BinaryOperator>(E1);
+    const auto *BinOp2 = cast<BinaryOperator>(E2);
+    return BinOp1->getOpcode() == BinOp2->getOpcode() &&
+           sameValue(BinOp1->getLHS(), BinOp2->getLHS()) &&
+           sameValue(BinOp1->getRHS(), BinOp2->getRHS());
+  }
   case Stmt::CharacterLiteralClass:
     return cast<CharacterLiteral>(E1)->getValue() ==
            cast<CharacterLiteral>(E2)->getValue();
@@ -176,6 +183,11 @@ static bool sameValue(const Expr *E1, const Expr *E2) {
            cast<StringLiteral>(E2)->getString();
   case Stmt::DeclRefExprClass:
     return cast<DeclRefExpr>(E1)->getDecl() == cast<DeclRefExpr>(E2)->getDecl();
+  case Stmt::CStyleCastExprClass:
+  case Stmt::CXXStaticCastExprClass:
+  case Stmt::CXXFunctionalCastExprClass:
+    return sameValue(cast<ExplicitCastExpr>(E1)->getSubExpr(),
+                     cast<ExplicitCastExpr>(E2)->getSubExpr());
   default:
     return false;
   }
@@ -194,20 +206,30 @@ void UseDefaultMemberInitCheck::storeOptions(
 }
 
 void UseDefaultMemberInitCheck::registerMatchers(MatchFinder *Finder) {
+  auto NumericLiteral = anyOf(integerLiteral(), floatLiteral());
+  auto UnaryNumericLiteral = unaryOperator(hasAnyOperatorName("+", "-"),
+                                           hasUnaryOperand(NumericLiteral));
+
+  auto ConstExprRef = varDecl(anyOf(isConstexpr(), isStaticStorageClass()));
+  auto ImmutableRef =
+      declRefExpr(to(decl(anyOf(enumConstantDecl(), ConstExprRef))));
+
+  auto BinaryNumericExpr = binaryOperator(
+      hasOperands(anyOf(NumericLiteral, ImmutableRef, binaryOperator()),
+                  anyOf(NumericLiteral, ImmutableRef, binaryOperator())));
+
   auto InitBase =
-      anyOf(stringLiteral(), characterLiteral(), integerLiteral(),
-            unaryOperator(hasAnyOperatorName("+", "-"),
-                          hasUnaryOperand(integerLiteral())),
-            floatLiteral(),
-            unaryOperator(hasAnyOperatorName("+", "-"),
-                          hasUnaryOperand(floatLiteral())),
-            cxxBoolLiteral(), cxxNullPtrLiteralExpr(), implicitValueInitExpr(),
-            declRefExpr(to(enumConstantDecl())));
+      anyOf(stringLiteral(), characterLiteral(), NumericLiteral,
+            UnaryNumericLiteral, cxxBoolLiteral(), cxxNullPtrLiteralExpr(),
+            implicitValueInitExpr(), ImmutableRef, BinaryNumericExpr);
+
+  auto ExplicitCastExpr = castExpr(hasSourceExpression(InitBase));
+  auto InitMatcher = anyOf(InitBase, ExplicitCastExpr);
 
   auto Init =
-      anyOf(initListExpr(anyOf(allOf(initCountIs(1), hasInit(0, InitBase)),
-                               initCountIs(0))),
-            InitBase);
+      anyOf(initListExpr(anyOf(allOf(initCountIs(1), hasInit(0, InitMatcher)),
+                               initCountIs(0), hasType(arrayType()))),
+            InitBase, ExplicitCastExpr);
 
   Finder->addMatcher(
       cxxConstructorDecl(forEachConstructorInitializer(
@@ -267,20 +289,30 @@ void UseDefaultMemberInitCheck::checkDefaultInit(
   CharSourceRange InitRange =
       CharSourceRange::getCharRange(LParenEnd, Init->getRParenLoc());
 
-  bool ValueInit = isa<ImplicitValueInitExpr>(Init->getInit());
-  bool CanAssign = UseAssignment && (!ValueInit || !Init->getInit()->getType()->isEnumeralType());
+  const Expr *InitExpression = Init->getInit();
+  const QualType InitType = InitExpression->getType();
+
+  const bool ValueInit =
+      isa<ImplicitValueInitExpr>(InitExpression) && !isa<ArrayType>(InitType);
+  const bool CanAssign =
+      UseAssignment && (!ValueInit || !InitType->isEnumeralType());
+  const bool NeedsBraces = !CanAssign || isa<ArrayType>(InitType);
 
   auto Diag =
       diag(Field->getLocation(), "use default member initializer for %0")
-      << Field
-      << FixItHint::CreateInsertion(FieldEnd, CanAssign ? " = " : "{")
-      << FixItHint::CreateInsertionFromRange(FieldEnd, InitRange);
+      << Field;
+
+  if (CanAssign)
+    Diag << FixItHint::CreateInsertion(FieldEnd, " = ");
+  if (NeedsBraces)
+    Diag << FixItHint::CreateInsertion(FieldEnd, "{");
 
   if (CanAssign && ValueInit)
-    Diag << FixItHint::CreateInsertion(
-        FieldEnd, getValueOfValueInit(Init->getInit()->getType()));
+    Diag << FixItHint::CreateInsertion(FieldEnd, getValueOfValueInit(InitType));
+  else
+    Diag << FixItHint::CreateInsertionFromRange(FieldEnd, InitRange);
 
-  if (!CanAssign)
+  if (NeedsBraces)
     Diag << FixItHint::CreateInsertion(FieldEnd, "}");
 
   Diag << FixItHint::CreateRemoval(Init->getSourceRange());
@@ -294,8 +326,7 @@ void UseDefaultMemberInitCheck::checkExistingInit(
     return;
 
   diag(Init->getSourceLocation(), "member initializer for %0 is redundant")
-      << Field
-      << FixItHint::CreateRemoval(Init->getSourceRange());
+      << Field << FixItHint::CreateRemoval(Init->getSourceRange());
 }
 
 } // namespace clang::tidy::modernize

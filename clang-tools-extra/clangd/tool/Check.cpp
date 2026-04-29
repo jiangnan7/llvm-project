@@ -24,12 +24,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "../clang-tidy/ClangTidyModule.h"
 #include "../clang-tidy/ClangTidyModuleRegistry.h"
+#include "../clang-tidy/ClangTidyOptions.h"
 #include "../clang-tidy/GlobList.h"
 #include "ClangdLSPServer.h"
+#include "ClangdServer.h"
 #include "CodeComplete.h"
 #include "CompileCommands.h"
+#include "Compiler.h"
 #include "Config.h"
+#include "ConfigFragment.h"
+#include "ConfigProvider.h"
+#include "Diagnostics.h"
 #include "Feature.h"
 #include "GlobalCompilationDatabase.h"
 #include "Hover.h"
@@ -37,23 +44,39 @@
 #include "ParsedAST.h"
 #include "Preamble.h"
 #include "Protocol.h"
+#include "Selection.h"
 #include "SemanticHighlighting.h"
 #include "SourceCode.h"
+#include "TidyProvider.h"
 #include "XRefs.h"
-#include "index/CanonicalIncludes.h"
+#include "clang-include-cleaner/Record.h"
 #include "index/FileIndex.h"
 #include "refactor/Tweak.h"
+#include "support/Context.h"
+#include "support/Logger.h"
 #include "support/ThreadsafeFS.h"
 #include "support/Trace.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/Diagnostic.h"
+#include "clang/Basic/LLVM.h"
 #include "clang/Format/Format.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Chrono.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace clang {
 namespace clangd {
@@ -82,15 +105,19 @@ llvm::cl::opt<bool> CheckCompletion{
     "check-completion",
     llvm::cl::desc("Run code-completion at each point (slow)"),
     llvm::cl::init(false)};
+llvm::cl::opt<bool> CheckWarnings{
+    "check-warnings",
+    llvm::cl::desc("Print warnings as well as errors"),
+    llvm::cl::init(false)};
 
-// Print (and count) the error-level diagnostics (warnings are ignored).
+// Print the diagnostics meeting severity threshold, and return count of errors.
 unsigned showErrors(llvm::ArrayRef<Diag> Diags) {
   unsigned ErrCount = 0;
   for (const auto &D : Diags) {
-    if (D.Severity >= DiagnosticsEngine::Error) {
+    if (D.Severity >= DiagnosticsEngine::Error || CheckWarnings)
       elog("[{0}] Line {1}: {2}", D.Name, D.Range.start.line + 1, D.Message);
+    if (D.Severity >= DiagnosticsEngine::Error)
       ++ErrCount;
-    }
   }
   return ErrCount;
 }
@@ -119,10 +146,13 @@ class Checker {
   ClangdLSPServer::Options Opts;
   // from buildCommand
   tooling::CompileCommand Cmd;
+  std::unique_ptr<GlobalCompilationDatabase> BaseCDB;
+  std::unique_ptr<GlobalCompilationDatabase> CDB;
   // from buildInvocation
   ParseInputs Inputs;
   std::unique_ptr<CompilerInvocation> Invocation;
   format::FormatStyle Style;
+  std::optional<ModulesBuilder> ModulesManager;
   // from buildAST
   std::shared_ptr<const PreambleData> Preamble;
   std::optional<ParsedAST> AST;
@@ -133,7 +163,7 @@ public:
   unsigned ErrCount = 0;
 
   Checker(llvm::StringRef File, const ClangdLSPServer::Options &Opts)
-      : File(File), Opts(Opts) {}
+      : File(File), Opts(Opts), Index(/*SupportContainedRefs=*/true) {}
 
   // Read compilation database and choose a compile command for the file.
   bool buildCommand(const ThreadsafeFS &TFS) {
@@ -141,24 +171,25 @@ public:
     DirectoryBasedGlobalCompilationDatabase::Options CDBOpts(TFS);
     CDBOpts.CompileCommandsDir =
         Config::current().CompileFlags.CDBSearch.FixedCDBPath;
-    std::unique_ptr<GlobalCompilationDatabase> BaseCDB =
+    BaseCDB =
         std::make_unique<DirectoryBasedGlobalCompilationDatabase>(CDBOpts);
     auto Mangler = CommandMangler::detect();
     Mangler.SystemIncludeExtractor =
         getSystemIncludeExtractor(llvm::ArrayRef(Opts.QueryDriverGlobs));
     if (Opts.ResourceDir)
       Mangler.ResourceDir = *Opts.ResourceDir;
-    auto CDB = std::make_unique<OverlayCDB>(
+    CDB = std::make_unique<OverlayCDB>(
         BaseCDB.get(), std::vector<std::string>{}, std::move(Mangler));
 
     if (auto TrueCmd = CDB->getCompileCommand(File)) {
       Cmd = std::move(*TrueCmd);
-      log("Compile command {0} is: {1}",
-          Cmd.Heuristic.empty() ? "from CDB" : Cmd.Heuristic,
+      log("Compile command {0} is: [{1}] {2}",
+          Cmd.Heuristic.empty() ? "from CDB" : Cmd.Heuristic, Cmd.Directory,
           printArgv(Cmd.CommandLine));
     } else {
       Cmd = CDB->getFallbackCommand(File);
-      log("Generic fallback command is: {0}", printArgv(Cmd.CommandLine));
+      log("Generic fallback command is: [{0}] {1}", Cmd.Directory,
+          printArgv(Cmd.CommandLine));
     }
 
     return true;
@@ -185,6 +216,11 @@ public:
         return false;
       }
     }
+    if (Opts.EnableExperimentalModulesSupport) {
+      if (!ModulesManager)
+        ModulesManager.emplace(*CDB);
+      Inputs.ModulesManager = &*ModulesManager;
+    }
     log("Parsing command...");
     Invocation =
         buildCompilerInvocation(Inputs, CaptureInvocationDiags, &CC1Args);
@@ -198,7 +234,7 @@ public:
 
     // FIXME: Check that resource-dir/built-in-headers exist?
 
-    Style = getFormatStyleForFile(File, Inputs.Contents, TFS);
+    Style = getFormatStyleForFile(File, Inputs.Contents, TFS, false);
 
     return true;
   }
@@ -206,15 +242,16 @@ public:
   // Build preamble and AST, and index them.
   bool buildAST() {
     log("Building preamble...");
-    Preamble = buildPreamble(File, *Invocation, Inputs, /*StoreInMemory=*/true,
-                             [&](ASTContext &Ctx, Preprocessor &PP,
-                                 const CanonicalIncludes &Includes) {
-                               if (!Opts.BuildDynamicSymbolIndex)
-                                 return;
-                               log("Indexing headers...");
-                               Index.updatePreamble(File, /*Version=*/"null",
-                                                    Ctx, PP, Includes);
-                             });
+    Preamble = buildPreamble(
+        File, *Invocation, Inputs, /*StoreInMemory=*/true,
+        [&](CapturedASTCtx Ctx,
+            std::shared_ptr<const include_cleaner::PragmaIncludes> PI) {
+          if (!Opts.BuildDynamicSymbolIndex)
+            return;
+          log("Indexing headers...");
+          Index.updatePreamble(File, /*Version=*/"null", Ctx.getASTContext(),
+                               Ctx.getPreprocessor(), *PI);
+        });
     if (!Preamble) {
       elog("Failed to build preamble");
       return false;
@@ -228,8 +265,8 @@ public:
       elog("Failed to build AST");
       return false;
     }
-    ErrCount += showErrors(llvm::ArrayRef(*AST->getDiagnostics())
-                               .drop_front(Preamble->Diags.size()));
+    ErrCount +=
+        showErrors(AST->getDiagnostics().drop_front(Preamble->Diags.size()));
 
     if (Opts.BuildDynamicSymbolIndex) {
       log("Indexing AST...");
@@ -338,13 +375,20 @@ public:
     auto Hints = inlayHints(*AST, LineRange);
 
     for (const auto &Hint : Hints) {
-      vlog("  {0} {1} {2}", Hint.kind, Hint.position, Hint.label);
+      vlog("  {0} {1} [{2}]", Hint.kind, Hint.position, [&] {
+        return llvm::join(llvm::map_range(Hint.label,
+                                          [&](auto &L) {
+                                            return llvm::formatv("{{{0}}", L);
+                                          }),
+                          ", ");
+      }());
     }
   }
 
   void buildSemanticHighlighting(std::optional<Range> LineRange) {
     log("Building semantic highlighting");
-    auto Highlights = getSemanticHighlightings(*AST);
+    auto Highlights =
+        getSemanticHighlightings(*AST, /*IncludeInactiveRegionTokens=*/true);
     for (const auto HL : Highlights)
       if (!LineRange || LineRange->contains(HL.R))
         vlog(" {0} {1} {2}", HL.R, HL.Kind, HL.Modifiers);
@@ -452,8 +496,23 @@ bool check(llvm::StringRef File, const ThreadsafeFS &TFS,
   }
   log("Testing on source file {0}", File);
 
+  class OverrideConfigProvider : public config::Provider {
+    std::vector<config::CompiledFragment>
+    getFragments(const config::Params &,
+                 config::DiagnosticCallback Diag) const override {
+      config::Fragment F;
+      // If we're timing clang-tidy checks, implicitly disabling the slow ones
+      // is counterproductive! 
+      if (CheckTidyTime.getNumOccurrences())
+        F.Diagnostics.ClangTidy.FastCheckFilter.emplace("None");
+      return {std::move(F).compile(Diag)};
+    }
+  } OverrideConfig;
+  auto ConfigProvider =
+      config::Provider::combine({Opts.ConfigProvider, &OverrideConfig});
+
   auto ContextProvider = ClangdServer::createConfiguredContextProvider(
-      Opts.ConfigProvider, nullptr);
+      ConfigProvider.get(), nullptr);
   WithContext Ctx(ContextProvider(
       FakeFile.empty()
           ? File

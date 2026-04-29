@@ -112,7 +112,7 @@ private:
   InstClassification classifyInstruction(MachineBasicBlock &MBB,
                                          MachineBasicBlock::iterator MI,
                                          const X86RegisterInfo &RegInfo,
-                                         DenseSet<unsigned int> &UsedRegs);
+                                         const DenseSet<MCRegister> &UsedRegs);
 
   StringRef getPassName() const override { return "X86 Optimize Call Frame"; }
 
@@ -239,8 +239,7 @@ bool X86CallFrameOptimization::runOnMachineFunction(MachineFunction &MF) {
   TFL = STI->getFrameLowering();
   MRI = &MF.getRegInfo();
 
-  const X86RegisterInfo &RegInfo =
-      *static_cast<const X86RegisterInfo *>(STI->getRegisterInfo());
+  const X86RegisterInfo &RegInfo = *STI->getRegisterInfo();
   SlotSize = RegInfo.getSlotSize();
   assert(isPowerOf2_32(SlotSize) && "Expect power of 2 stack slot size");
   Log2SlotSize = Log2_32(SlotSize);
@@ -278,22 +277,22 @@ bool X86CallFrameOptimization::runOnMachineFunction(MachineFunction &MF) {
 X86CallFrameOptimization::InstClassification
 X86CallFrameOptimization::classifyInstruction(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
-    const X86RegisterInfo &RegInfo, DenseSet<unsigned int> &UsedRegs) {
+    const X86RegisterInfo &RegInfo, const DenseSet<MCRegister> &UsedRegs) {
   if (MI == MBB.end())
     return Exit;
 
   // The instructions we actually care about are movs onto the stack or special
   // cases of constant-stores to stack
   switch (MI->getOpcode()) {
-    case X86::AND16mi8:
-    case X86::AND32mi8:
-    case X86::AND64mi8: {
+    case X86::AND16mi:
+    case X86::AND32mi:
+    case X86::AND64mi32: {
       const MachineOperand &ImmOp = MI->getOperand(X86::AddrNumOperands);
       return ImmOp.getImm() == 0 ? Convert : Exit;
     }
-    case X86::OR16mi8:
-    case X86::OR32mi8:
-    case X86::OR64mi8: {
+    case X86::OR16mi:
+    case X86::OR32mi:
+    case X86::OR64mi32: {
       const MachineOperand &ImmOp = MI->getOperand(X86::AddrNumOperands);
       return ImmOp.getImm() == -1 ? Convert : Exit;
     }
@@ -341,7 +340,7 @@ X86CallFrameOptimization::classifyInstruction(
     if (RegInfo.regsOverlap(Reg, RegInfo.getStackRegister()))
       return Exit;
     if (MO.isDef()) {
-      for (unsigned int U : UsedRegs)
+      for (MCRegister U : UsedRegs)
         if (RegInfo.regsOverlap(Reg, U))
           return Exit;
     }
@@ -356,8 +355,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
                                                CallContext &Context) {
   // Check that this particular call sequence is amenable to the
   // transformation.
-  const X86RegisterInfo &RegInfo =
-      *static_cast<const X86RegisterInfo *>(STI->getRegisterInfo());
+  const X86RegisterInfo &RegInfo = *STI->getRegisterInfo();
 
   // We expect to enter this at the beginning of a call sequence
   assert(I->getOpcode() == TII->getCallFrameSetupOpcode());
@@ -406,7 +404,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
   if (MaxAdjust > 4)
     Context.ArgStoreVector.resize(MaxAdjust, nullptr);
 
-  DenseSet<unsigned int> UsedRegs;
+  DenseSet<MCRegister> UsedRegs;
 
   for (InstClassification Classification = Skip; Classification != Exit; ++I) {
     // If this is the COPY of the stack pointer, it's ok to ignore.
@@ -455,7 +453,7 @@ void X86CallFrameOptimization::collectCallInfo(MachineFunction &MF,
         continue;
       Register Reg = MO.getReg();
       if (Reg.isPhysical())
-        UsedRegs.insert(Reg);
+        UsedRegs.insert(Reg.asMCReg());
     }
   }
 
@@ -512,24 +510,15 @@ void X86CallFrameOptimization::adjustCallSequence(MachineFunction &MF,
     switch (Store->getOpcode()) {
     default:
       llvm_unreachable("Unexpected Opcode!");
-    case X86::AND16mi8:
-    case X86::AND32mi8:
-    case X86::AND64mi8:
-    case X86::OR16mi8:
-    case X86::OR32mi8:
-    case X86::OR64mi8:
+    case X86::AND16mi:
+    case X86::AND32mi:
+    case X86::AND64mi32:
+    case X86::OR16mi:
+    case X86::OR32mi:
+    case X86::OR64mi32:
     case X86::MOV32mi:
     case X86::MOV64mi32:
-      PushOpcode = Is64Bit ? X86::PUSH64i32 : X86::PUSHi32;
-      // If the operand is a small (8-bit) immediate, we can use a
-      // PUSH instruction with a shorter encoding.
-      // Note that isImm() may fail even though this is a MOVmi, because
-      // the operand can also be a symbol.
-      if (PushOp.isImm()) {
-        int64_t Val = PushOp.getImm();
-        if (isInt<8>(Val))
-          PushOpcode = Is64Bit ? X86::PUSH64i8 : X86::PUSH32i8;
-      }
+      PushOpcode = Is64Bit ? X86::PUSH64i32 : X86::PUSH32i;
       Push = BuildMI(MBB, Context.Call, DL, TII->get(PushOpcode)).add(PushOp);
       Push->cloneMemRefs(MF, *Store);
       break;

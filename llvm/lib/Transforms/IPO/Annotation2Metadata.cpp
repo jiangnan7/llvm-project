@@ -17,9 +17,6 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Module.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
-#include "llvm/Transforms/IPO.h"
 
 using namespace llvm;
 
@@ -66,6 +63,6 @@ static bool convertAnnotation2Metadata(Module &M) {
 
 PreservedAnalyses Annotation2MetadataPass::run(Module &M,
                                                ModuleAnalysisManager &AM) {
-  convertAnnotation2Metadata(M);
-  return PreservedAnalyses::all();
+  return convertAnnotation2Metadata(M) ? PreservedAnalyses::none()
+                                       : PreservedAnalyses::all();
 }

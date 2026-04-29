@@ -9,6 +9,8 @@
 #ifndef MLIR_DIALECT_VECTOR_TRANSFORMS_PASSES_H_
 #define MLIR_DIALECT_VECTOR_TRANSFORMS_PASSES_H_
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Vector/Transforms/VectorTransforms.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
@@ -16,17 +18,13 @@ namespace vector {
 #define GEN_PASS_DECL
 #include "mlir/Dialect/Vector/Transforms/Passes.h.inc"
 
-/// Creates an instance of the `vector` dialect bufferization pass.
-std::unique_ptr<Pass> createVectorBufferizePass();
-
 /// Creates an instance of the `vector.mask` lowering pass.
 std::unique_ptr<Pass> createLowerVectorMaskPass();
 
-/// Populates instances of `MaskOpRewritePattern` to lower masked operations
-/// with `vector.mask`. Patterns should rewrite the `vector.mask` operation and
-/// not its nested `MaskableOpInterface`.
-void populateVectorMaskLoweringPatternsForSideEffectingOps(
-    RewritePatternSet &patterns);
+/// Creates an instance of the `vector.multi_reduction` lowering pass.
+std::unique_ptr<Pass> createLowerVectorMultiReductionPass(
+    VectorMultiReductionLowering option =
+        VectorMultiReductionLowering::InnerParallel);
 
 //===----------------------------------------------------------------------===//
 // Registration

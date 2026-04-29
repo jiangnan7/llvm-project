@@ -94,7 +94,7 @@ void SBAttachInfo::SetResumeCount(uint32_t c) {
 const char *SBAttachInfo::GetProcessPluginName() {
   LLDB_INSTRUMENT_VA(this);
 
-  return m_opaque_sp->GetProcessPluginName();
+  return ConstString(m_opaque_sp->GetProcessPluginName()).GetCString();
 }
 
 void SBAttachInfo::SetProcessPluginName(const char *plugin_name) {
@@ -252,6 +252,21 @@ void SBAttachInfo::SetListener(SBListener &listener) {
   LLDB_INSTRUMENT_VA(this, listener);
 
   m_opaque_sp->SetListener(listener.GetSP());
+}
+
+SBListener SBAttachInfo::GetShadowListener() {
+  LLDB_INSTRUMENT_VA(this);
+
+  lldb::ListenerSP shadow_sp = m_opaque_sp->GetShadowListener();
+  if (!shadow_sp)
+    return SBListener();
+  return SBListener(shadow_sp);
+}
+
+void SBAttachInfo::SetShadowListener(SBListener &listener) {
+  LLDB_INSTRUMENT_VA(this, listener);
+
+  m_opaque_sp->SetShadowListener(listener.GetSP());
 }
 
 const char *SBAttachInfo::GetScriptedProcessClassName() const {

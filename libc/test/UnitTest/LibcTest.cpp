@@ -8,148 +8,113 @@
 
 #include "LibcTest.h"
 
+#include "include/llvm-libc-macros/stdfix-macros.h"
+#include "src/__support/CPP/string.h"
 #include "src/__support/CPP/string_view.h"
-#include "src/__support/UInt128.h"
-#include "utils/testutils/ExecuteFunction.h"
-#include <cassert>
-#include <iostream>
-#include <string>
+#include "src/__support/fixed_point/fx_rep.h"
+#include "src/__support/macros/config.h"
+#include "src/__support/macros/properties/types.h" // LIBC_TYPES_HAS_INT128
+#include "src/__support/uint128.h"
+#include "test/UnitTest/TestLogger.h"
 
-namespace __llvm_libc {
+#if __STDC_HOSTED__
+#include <time.h>
+#define LIBC_TEST_USE_CLOCK
+#elif defined(TARGET_SUPPORTS_CLOCK)
+#include <time.h>
+
+#include "src/time/clock.h"
+extern "C" clock_t clock() noexcept { return LIBC_NAMESPACE::clock(); }
+#define LIBC_TEST_USE_CLOCK
+#endif
+
+namespace LIBC_NAMESPACE_DECL {
 namespace testing {
-
-// This need not be a class as all it has is a single read-write state variable.
-// But, we make it class as then its implementation can be hidden from the
-// header file.
-class RunContext {
-public:
-  enum RunResult { Result_Pass = 1, Result_Fail = 2 };
-
-  RunResult status() const { return Status; }
-
-  void markFail() { Status = Result_Fail; }
-
-private:
-  RunResult Status = Result_Pass;
-};
 
 namespace internal {
 
-// When the value is UInt128 or __uint128_t, show its hexadecimal digits.
-// We cannot just use a UInt128 specialization as that resolves to only
-// one type, UInt<128> or __uint128_t. We want both overloads as we want to
-// be able to unittest UInt<128> on platforms where UInt128 resolves to
-// UInt128.
+TestLogger &operator<<(TestLogger &logger, Location Loc) {
+  return logger << Loc.file << ":" << Loc.line << ": FAILURE\n";
+}
+
+// When the value is UInt128, __uint128_t or wider, show its hexadecimal
+// digits.
 template <typename T>
-cpp::enable_if_t<cpp::is_integral_v<T> && cpp::is_unsigned_v<T>, std::string>
-describeValueUInt(T Value) {
-  static_assert(sizeof(T) % 8 == 0, "Unsupported size of UInt");
-  std::string S(sizeof(T) * 2, '0');
-
-  constexpr char HEXADECIMALS[16] = {'0', '1', '2', '3', '4', '5', '6', '7',
-                                     '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
-
-  for (auto I = S.rbegin(), End = S.rend(); I != End; ++I, Value >>= 8) {
-    unsigned char Mod = static_cast<unsigned char>(Value) & 0xFF;
-    *(I++) = HEXADECIMALS[Mod & 0x0F];
-    *I = HEXADECIMALS[Mod >> 4];
-  }
-
-  return "0x" + S;
+cpp::enable_if_t<(cpp::is_integral_v<T> && (sizeof(T) > sizeof(uint64_t))) ||
+                     is_big_int_v<T>,
+                 cpp::string>
+describeValue(T Value) {
+  const IntegerToString<T, radix::Hex::WithPrefix> buffer(Value);
+  return buffer.view();
 }
 
-// When the value is of integral type, just display it as normal.
-template <typename ValType>
-cpp::enable_if_t<cpp::is_integral_v<ValType>, std::string>
-describeValue(ValType Value) {
-  if constexpr (sizeof(ValType) <= sizeof(uint64_t)) {
-    return std::to_string(Value);
-  } else {
-    return describeValueUInt(Value);
-  }
+// When the value is of a standard integral type, just display it as normal.
+template <typename T>
+cpp::enable_if_t<cpp::is_integral_v<T> && (sizeof(T) <= sizeof(uint64_t)),
+                 cpp::string>
+describeValue(T Value) {
+  return cpp::to_string(Value);
 }
 
-std::string describeValue(std::string Value) { return std::string(Value); }
-std::string describeValue(cpp::string_view Value) {
-  return std::string(Value.data(), Value.size());
+#ifdef LIBC_COMPILER_HAS_FIXED_POINT
+template <typename T>
+cpp::enable_if_t<cpp::is_fixed_point_v<T>, cpp::string> describeValue(T Value) {
+  using FXRep = fixed_point::FXRep<T>;
+  using comp_t = typename FXRep::CompType;
+
+  return cpp::to_string(cpp::bit_cast<comp_t>(Value)) + " * 2^-" +
+         cpp::to_string(FXRep::FRACTION_LEN);
 }
+#endif // LIBC_COMPILER_HAS_FIXED_POINT
+
+cpp::string_view describeValue(const cpp::string &Value) { return Value; }
+cpp::string_view describeValue(cpp::string_view Value) { return Value; }
 
 template <typename ValType>
-void explainDifference(ValType LHS, ValType RHS, const char *LHSStr,
-                       const char *RHSStr, const char *File, unsigned long Line,
-                       std::string OpString) {
-  size_t OffsetLength = OpString.size() > 2 ? OpString.size() - 2 : 0;
-  std::string Offset(OffsetLength, ' ');
-
-  std::cout << File << ":" << Line << ": FAILURE\n"
-            << Offset << "Expected: " << LHSStr << '\n'
-            << Offset << "Which is: " << describeValue(LHS) << '\n'
-            << "To be " << OpString << ": " << RHSStr << '\n'
-            << Offset << "Which is: " << describeValue(RHS) << '\n';
-}
-
-template <typename ValType>
-bool test(RunContext *Ctx, TestCondition Cond, ValType LHS, ValType RHS,
-          const char *LHSStr, const char *RHSStr, const char *File,
-          unsigned long Line) {
-  auto ExplainDifference = [=](std::string OpString) {
-    explainDifference(LHS, RHS, LHSStr, RHSStr, File, Line, OpString);
+bool test(RunContext *Ctx, TestCond Cond, ValType LHS, ValType RHS,
+          const char *LHSStr, const char *RHSStr, Location Loc) {
+  auto ExplainDifference = [=, &Ctx](bool Cond,
+                                     cpp::string_view OpString) -> bool {
+    if (Cond)
+      return true;
+    Ctx->markFail();
+    size_t OffsetLength = OpString.size() > 2 ? OpString.size() - 2 : 0;
+    cpp::string Offset(OffsetLength, ' ');
+    tlog << Loc;
+    tlog << Offset << "Expected: " << LHSStr << '\n'
+         << Offset << "Which is: " << describeValue(LHS) << '\n'
+         << "To be " << OpString << ": " << RHSStr << '\n'
+         << Offset << "Which is: " << describeValue(RHS) << '\n';
+    return false;
   };
 
   switch (Cond) {
-  case Cond_EQ:
-    if (LHS == RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("equal to");
-    return false;
-  case Cond_NE:
-    if (LHS != RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("not equal to");
-    return false;
-  case Cond_LT:
-    if (LHS < RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("less than");
-    return false;
-  case Cond_LE:
-    if (LHS <= RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("less than or equal to");
-    return false;
-  case Cond_GT:
-    if (LHS > RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("greater than");
-    return false;
-  case Cond_GE:
-    if (LHS >= RHS)
-      return true;
-
-    Ctx->markFail();
-    ExplainDifference("greater than or equal to");
-    return false;
-  default:
-    Ctx->markFail();
-    std::cout << "Unexpected test condition.\n";
-    return false;
+  case TestCond::EQ:
+    return ExplainDifference(LHS == RHS, "equal to");
+  case TestCond::NE:
+    return ExplainDifference(LHS != RHS, "not equal to");
+  case TestCond::LT:
+    return ExplainDifference(LHS < RHS, "less than");
+  case TestCond::LE:
+    return ExplainDifference(LHS <= RHS, "less than or equal to");
+  case TestCond::GT:
+    return ExplainDifference(LHS > RHS, "greater than");
+  case TestCond::GE:
+    return ExplainDifference(LHS >= RHS, "greater than or equal to");
   }
+  __builtin_unreachable();
 }
 
 } // namespace internal
 
 Test *Test::Start = nullptr;
 Test *Test::End = nullptr;
+
+int argc = 0;
+char **argv = nullptr;
+char **envp = nullptr;
+
+using internal::RunContext;
 
 void Test::addTest(Test *T) {
   if (End == nullptr) {
@@ -162,45 +127,83 @@ void Test::addTest(Test *T) {
   End = T;
 }
 
-int Test::runTests(const char *TestFilter) {
-  int TestCount = 0;
+int Test::getNumTests() {
+  int N = 0;
+  for (Test *T = Start; T; T = T->Next, ++N)
+    ;
+  return N;
+}
+
+int Test::runTests(const TestOptions &Options) {
+  const char *green = Options.PrintColor ? "\033[32m" : "";
+  const char *red = Options.PrintColor ? "\033[31m" : "";
+  const char *reset = Options.PrintColor ? "\033[0m" : "";
+
+  int TestCount = getNumTests();
+  if (TestCount) {
+    tlog << green << "[==========] " << reset << "Running " << TestCount
+         << " test";
+    if (TestCount > 1)
+      tlog << "s";
+    tlog << " from 1 test suite.\n";
+  }
+
   int FailCount = 0;
   for (Test *T = Start; T != nullptr; T = T->Next) {
     const char *TestName = T->getName();
-    std::string StrTestName(TestName);
-    constexpr auto GREEN = "\033[32m";
-    constexpr auto RED = "\033[31m";
-    constexpr auto RESET = "\033[0m";
-    if ((TestFilter != nullptr) && (StrTestName != TestFilter)) {
+
+    if (Options.TestFilter && cpp::string(TestName) != Options.TestFilter) {
+      --TestCount;
       continue;
     }
-    std::cout << GREEN << "[ RUN      ] " << RESET << TestName << '\n';
+
+    tlog << green << "[ RUN      ] " << reset << TestName << '\n';
+    [[maybe_unused]] const uint64_t start_time = static_cast<uint64_t>(clock());
     RunContext Ctx;
     T->SetUp();
     T->setContext(&Ctx);
     T->Run();
     T->TearDown();
-    auto Result = Ctx.status();
-    switch (Result) {
-    case RunContext::Result_Fail:
-      std::cout << RED << "[  FAILED  ] " << RESET << TestName << '\n';
+    [[maybe_unused]] const uint64_t end_time = static_cast<uint64_t>(clock());
+    switch (Ctx.status()) {
+    case RunContext::RunResult::Fail:
+      tlog << red << "[  FAILED  ] " << reset << TestName << '\n';
       ++FailCount;
       break;
-    case RunContext::Result_Pass:
-      std::cout << GREEN << "[       OK ] " << RESET << TestName << '\n';
+    case RunContext::RunResult::Pass:
+      tlog << green << "[       OK ] " << reset << TestName;
+#ifdef LIBC_TEST_USE_CLOCK
+      tlog << " (";
+      if (start_time > end_time) {
+        tlog << "unknown - try rerunning)\n";
+      } else {
+        const auto duration = end_time - start_time;
+        const uint64_t duration_ms = (duration * 1000) / CLOCKS_PER_SEC;
+        const uint64_t duration_us = (duration * 1000 * 1000) / CLOCKS_PER_SEC;
+        const uint64_t duration_ns =
+            (duration * 1000 * 1000 * 1000) / CLOCKS_PER_SEC;
+        if (Options.TimeInMs || duration_ms != 0)
+          tlog << duration_ms << " ms)\n";
+        else if (duration_us != 0)
+          tlog << duration_us << " us)\n";
+        else
+          tlog << duration_ns << " ns)\n";
+      }
+#else
+      tlog << '\n';
+#endif
       break;
     }
-    ++TestCount;
   }
 
   if (TestCount > 0) {
-    std::cout << "Ran " << TestCount << " tests. "
-              << " PASS: " << TestCount - FailCount << ' '
-              << " FAIL: " << FailCount << '\n';
+    tlog << "Ran " << TestCount << " tests. "
+         << " PASS: " << TestCount - FailCount << ' ' << " FAIL: " << FailCount
+         << '\n';
   } else {
-    std::cout << "No tests run.\n";
-    if (TestFilter) {
-      std::cout << "No matching test for " << TestFilter << '\n';
+    tlog << "No tests run.\n";
+    if (Options.TestFilter) {
+      tlog << "No matching test for " << Options.TestFilter << '\n';
     }
   }
 
@@ -209,210 +212,90 @@ int Test::runTests(const char *TestFilter) {
 
 namespace internal {
 
-template bool test<char>(RunContext *Ctx, TestCondition Cond, char LHS,
-                         char RHS, const char *LHSStr, const char *RHSStr,
-                         const char *File, unsigned long Line);
+#define TEST_SPECIALIZATION(TYPE)                                              \
+  template bool test<TYPE>(RunContext * Ctx, TestCond Cond, TYPE LHS,          \
+                           TYPE RHS, const char *LHSStr, const char *RHSStr,   \
+                           Location Loc)
 
-template bool test<short>(RunContext *Ctx, TestCondition Cond, short LHS,
-                          short RHS, const char *LHSStr, const char *RHSStr,
-                          const char *File, unsigned long Line);
+TEST_SPECIALIZATION(char);
+TEST_SPECIALIZATION(short);
+TEST_SPECIALIZATION(int);
+TEST_SPECIALIZATION(long);
+TEST_SPECIALIZATION(long long);
 
-template bool test<int>(RunContext *Ctx, TestCondition Cond, int LHS, int RHS,
-                        const char *LHSStr, const char *RHSStr,
-                        const char *File, unsigned long Line);
+TEST_SPECIALIZATION(signed char);
+TEST_SPECIALIZATION(unsigned char);
+TEST_SPECIALIZATION(unsigned short);
+TEST_SPECIALIZATION(unsigned int);
+TEST_SPECIALIZATION(unsigned long);
+TEST_SPECIALIZATION(unsigned long long);
 
-template bool test<long>(RunContext *Ctx, TestCondition Cond, long LHS,
-                         long RHS, const char *LHSStr, const char *RHSStr,
-                         const char *File, unsigned long Line);
-
-template bool test<long long>(RunContext *Ctx, TestCondition Cond,
-                              long long LHS, long long RHS, const char *LHSStr,
-                              const char *RHSStr, const char *File,
-                              unsigned long Line);
-
-template bool test<unsigned char>(RunContext *Ctx, TestCondition Cond,
-                                  unsigned char LHS, unsigned char RHS,
-                                  const char *LHSStr, const char *RHSStr,
-                                  const char *File, unsigned long Line);
-
-template bool test<unsigned short>(RunContext *Ctx, TestCondition Cond,
-                                   unsigned short LHS, unsigned short RHS,
-                                   const char *LHSStr, const char *RHSStr,
-                                   const char *File, unsigned long Line);
-
-template bool test<unsigned int>(RunContext *Ctx, TestCondition Cond,
-                                 unsigned int LHS, unsigned int RHS,
-                                 const char *LHSStr, const char *RHSStr,
-                                 const char *File, unsigned long Line);
-
-template bool test<unsigned long>(RunContext *Ctx, TestCondition Cond,
-                                  unsigned long LHS, unsigned long RHS,
-                                  const char *LHSStr, const char *RHSStr,
-                                  const char *File, unsigned long Line);
-
-template bool test<bool>(RunContext *Ctx, TestCondition Cond, bool LHS,
-                         bool RHS, const char *LHSStr, const char *RHSStr,
-                         const char *File, unsigned long Line);
-
-template bool test<unsigned long long>(RunContext *Ctx, TestCondition Cond,
-                                       unsigned long long LHS,
-                                       unsigned long long RHS,
-                                       const char *LHSStr, const char *RHSStr,
-                                       const char *File, unsigned long Line);
+TEST_SPECIALIZATION(bool);
 
 // We cannot just use a single UInt128 specialization as that resolves to only
 // one type, UInt<128> or __uint128_t. We want both overloads as we want to
-// be able to unittest UInt<128> on platforms where UInt128 resolves to
-// UInt128.
-#ifdef __SIZEOF_INT128__
+#ifdef LIBC_TYPES_HAS_INT128
 // When builtin __uint128_t type is available, include its specialization
 // also.
-template bool test<__uint128_t>(RunContext *Ctx, TestCondition Cond,
-                                __uint128_t LHS, __uint128_t RHS,
-                                const char *LHSStr, const char *RHSStr,
-                                const char *File, unsigned long Line);
-#endif
+TEST_SPECIALIZATION(__uint128_t);
+#endif // LIBC_TYPES_HAS_INT128
 
-template bool test<__llvm_libc::cpp::UInt<128>>(
-    RunContext *Ctx, TestCondition Cond, __llvm_libc::cpp::UInt<128> LHS,
-    __llvm_libc::cpp::UInt<128> RHS, const char *LHSStr, const char *RHSStr,
-    const char *File, unsigned long Line);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::Int<128>);
 
-template bool test<__llvm_libc::cpp::UInt<192>>(
-    RunContext *Ctx, TestCondition Cond, __llvm_libc::cpp::UInt<192> LHS,
-    __llvm_libc::cpp::UInt<192> RHS, const char *LHSStr, const char *RHSStr,
-    const char *File, unsigned long Line);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::UInt<96>);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::UInt<128>);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::UInt<192>);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::UInt<256>);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::UInt<320>);
 
-template bool test<__llvm_libc::cpp::UInt<256>>(
-    RunContext *Ctx, TestCondition Cond, __llvm_libc::cpp::UInt<256> LHS,
-    __llvm_libc::cpp::UInt<256> RHS, const char *LHSStr, const char *RHSStr,
-    const char *File, unsigned long Line);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::cpp::string_view);
+TEST_SPECIALIZATION(LIBC_NAMESPACE::cpp::string);
 
-template bool test<__llvm_libc::cpp::UInt<320>>(
-    RunContext *Ctx, TestCondition Cond, __llvm_libc::cpp::UInt<320> LHS,
-    __llvm_libc::cpp::UInt<320> RHS, const char *LHSStr, const char *RHSStr,
-    const char *File, unsigned long Line);
+#ifdef LIBC_COMPILER_HAS_FIXED_POINT
+TEST_SPECIALIZATION(short fract);
+TEST_SPECIALIZATION(fract);
+TEST_SPECIALIZATION(long fract);
+TEST_SPECIALIZATION(unsigned short fract);
+TEST_SPECIALIZATION(unsigned fract);
+TEST_SPECIALIZATION(unsigned long fract);
 
-template bool test<__llvm_libc::cpp::string_view>(
-    RunContext *Ctx, TestCondition Cond, __llvm_libc::cpp::string_view LHS,
-    __llvm_libc::cpp::string_view RHS, const char *LHSStr, const char *RHSStr,
-    const char *File, unsigned long Line);
+TEST_SPECIALIZATION(short accum);
+TEST_SPECIALIZATION(accum);
+TEST_SPECIALIZATION(long accum);
+TEST_SPECIALIZATION(unsigned short accum);
+TEST_SPECIALIZATION(unsigned accum);
+TEST_SPECIALIZATION(unsigned long accum);
+#endif // LIBC_COMPILER_HAS_FIXED_POINT
 
 } // namespace internal
 
 bool Test::testStrEq(const char *LHS, const char *RHS, const char *LHSStr,
-                     const char *RHSStr, const char *File, unsigned long Line) {
-  return internal::test(Ctx, Cond_EQ, LHS ? std::string(LHS) : std::string(),
-                        RHS ? std::string(RHS) : std::string(), LHSStr, RHSStr,
-                        File, Line);
+                     const char *RHSStr, internal::Location Loc) {
+  return internal::test(
+      Ctx, TestCond::EQ, LHS ? cpp::string_view(LHS) : cpp::string_view(),
+      RHS ? cpp::string_view(RHS) : cpp::string_view(), LHSStr, RHSStr, Loc);
 }
 
 bool Test::testStrNe(const char *LHS, const char *RHS, const char *LHSStr,
-                     const char *RHSStr, const char *File, unsigned long Line) {
-  return internal::test(Ctx, Cond_NE, LHS ? std::string(LHS) : std::string(),
-                        RHS ? std::string(RHS) : std::string(), LHSStr, RHSStr,
-                        File, Line);
+                     const char *RHSStr, internal::Location Loc) {
+  return internal::test(
+      Ctx, TestCond::NE, LHS ? cpp::string_view(LHS) : cpp::string_view(),
+      RHS ? cpp::string_view(RHS) : cpp::string_view(), LHSStr, RHSStr, Loc);
 }
 
 bool Test::testMatch(bool MatchResult, MatcherBase &Matcher, const char *LHSStr,
-                     const char *RHSStr, const char *File, unsigned long Line) {
+                     const char *RHSStr, internal::Location Loc) {
   if (MatchResult)
     return true;
 
   Ctx->markFail();
   if (!Matcher.is_silent()) {
-    std::cout << File << ":" << Line << ": FAILURE\n"
-              << "Failed to match " << LHSStr << " against " << RHSStr << ".\n";
-    testutils::StreamWrapper OutsWrapper = testutils::outs();
-    Matcher.explainError(OutsWrapper);
+    tlog << Loc;
+    tlog << "Failed to match " << LHSStr << " against " << RHSStr << ".\n";
+    Matcher.explainError();
   }
   return false;
 }
 
-#ifdef ENABLE_SUBPROCESS_TESTS
-
-bool Test::testProcessKilled(testutils::FunctionCaller *Func, int Signal,
-                             const char *LHSStr, const char *RHSStr,
-                             const char *File, unsigned long Line) {
-  testutils::ProcessStatus Result = testutils::invoke_in_subprocess(Func, 500);
-
-  if (const char *error = Result.get_error()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n" << error << '\n';
-    return false;
-  }
-
-  if (Result.timed_out()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n"
-              << "Process timed out after " << 500 << " milliseconds.\n";
-    return false;
-  }
-
-  if (Result.exited_normally()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n"
-              << "Expected " << LHSStr
-              << " to be killed by a signal\nBut it exited normally!\n";
-    return false;
-  }
-
-  int KilledBy = Result.get_fatal_signal();
-  assert(KilledBy != 0 && "Not killed by any signal");
-  if (Signal == -1 || KilledBy == Signal)
-    return true;
-
-  using testutils::signal_as_string;
-  Ctx->markFail();
-  std::cout << File << ":" << Line << ": FAILURE\n"
-            << "              Expected: " << LHSStr << '\n'
-            << "To be killed by signal: " << Signal << '\n'
-            << "              Which is: " << signal_as_string(Signal) << '\n'
-            << "  But it was killed by: " << KilledBy << '\n'
-            << "              Which is: " << signal_as_string(KilledBy) << '\n';
-  return false;
-}
-
-bool Test::testProcessExits(testutils::FunctionCaller *Func, int ExitCode,
-                            const char *LHSStr, const char *RHSStr,
-                            const char *File, unsigned long Line) {
-  testutils::ProcessStatus Result = testutils::invoke_in_subprocess(Func, 500);
-
-  if (const char *error = Result.get_error()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n" << error << '\n';
-    return false;
-  }
-
-  if (Result.timed_out()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n"
-              << "Process timed out after " << 500 << " milliseconds.\n";
-    return false;
-  }
-
-  if (!Result.exited_normally()) {
-    Ctx->markFail();
-    std::cout << File << ":" << Line << ": FAILURE\n"
-              << "Expected " << LHSStr << '\n'
-              << "to exit with exit code " << ExitCode << '\n'
-              << "But it exited abnormally!\n";
-    return false;
-  }
-
-  int ActualExit = Result.get_exit_code();
-  if (ActualExit == ExitCode)
-    return true;
-
-  Ctx->markFail();
-  std::cout << File << ":" << Line << ": FAILURE\n"
-            << "Expected exit code of: " << LHSStr << '\n'
-            << "             Which is: " << ActualExit << '\n'
-            << "       To be equal to: " << RHSStr << '\n'
-            << "             Which is: " << ExitCode << '\n';
-  return false;
-}
-
-#endif // ENABLE_SUBPROCESS_TESTS
 } // namespace testing
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE_DECL

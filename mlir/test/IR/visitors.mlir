@@ -17,7 +17,7 @@ func.func @structured_cfg() {
       "use2"(%i) : (index) -> ()
     }
     "use3"(%i) : (index) -> ()
-  }
+  } {walk_blocks, walk_regions}
   return
 }
 
@@ -87,6 +87,26 @@ func.func @structured_cfg() {
 // CHECK:       Visiting op 'arith.constant'
 // CHECK:       Visiting op 'func.func'
 // CHECK:       Visiting op 'builtin.module'
+
+// CHECK-LABEL: Invoke block pre-order visits on blocks
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'scf.for'
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'scf.if'
+// CHECK:       Visiting block ^bb0 from region 1 from operation 'scf.if'
+
+// CHECK-LABEL: Invoke block post-order visits on blocks
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'scf.if'
+// CHECK:       Visiting block ^bb0 from region 1 from operation 'scf.if'
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'scf.for'
+
+// CHECK-LABEL: Invoke region pre-order visits on region
+// CHECK:       Visiting region 0 from operation 'scf.for'
+// CHECK:       Visiting region 0 from operation 'scf.if'
+// CHECK:       Visiting region 1 from operation 'scf.if'
+
+// CHECK-LABEL: Invoke region post-order visits on region
+// CHECK:       Visiting region 0 from operation 'scf.if'
+// CHECK:       Visiting region 1 from operation 'scf.if'
+// CHECK:       Visiting region 0 from operation 'scf.for'
 
 // CHECK-LABEL: Op pre-order erasures
 // CHECK:       Erasing op 'scf.for'
@@ -320,6 +340,36 @@ func.func @unordered_cfg_with_loop() {
 // CHECK:       Visiting block ^bb0 from region 0 from operation 'func.func'
 
 // CHECK-LABEL: Region forward dominance post-order visits
+// CHECK:       Visiting region 0 from operation 'regionOp0'
+// CHECK:       Visiting region 0 from operation 'func.func'
+
+// CHECK-LABEL: Op reverse dominance post-order visits
+// CHECK:       Visiting op 'func.return'
+// CHECK-NOT:   Visiting op 'op6'
+// CHECK:       Visiting op 'op7'
+// CHECK:       Visiting op 'cf.br'
+// CHECK:       Visiting op 'op5'
+// CHECK:       Visiting op 'cf.br'
+// CHECK:       Visiting op 'op1'
+// CHECK:       Visiting op 'cf.br'
+// CHECK:       Visiting op 'op2'
+// CHECK:       Visiting op 'cf.br'
+// CHECK:       Visiting op 'op3'
+// CHECK:       Visiting op 'cf.cond_br'
+// CHECK:       Visiting op 'op0'
+// CHECK:       Visiting op 'regionOp0'
+// CHECK:       Visiting op 'func.func'
+
+// CHECK-LABEL: Block reverse dominance post-order visits
+// CHECK:       Visiting block ^bb7 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb5 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb1 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb2 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb3 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'regionOp0'
+// CHECK:       Visiting block ^bb0 from region 0 from operation 'func.func'
+
+// CHECK-LABEL: Region reverse dominance post-order visits
 // CHECK:       Visiting region 0 from operation 'regionOp0'
 // CHECK:       Visiting region 0 from operation 'func.func'
 

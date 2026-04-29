@@ -94,7 +94,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
     /// computeDependence).
     bool CanReorder;
 
-    /// If non-None, then an instruction in \p Insts that also must be
+    /// If non-std::nullopt, then an instruction in \p Insts that also must be
     /// hoisted.
     std::optional<ArrayRef<MachineInstr *>::iterator> PotentialDependence;
 
@@ -195,7 +195,7 @@ class ImplicitNullChecks : public MachineFunctionPass {
   /// to be used. \p PrevInsts is the set of instruction seen since
   /// the explicit null check on \p PointerReg.
   SuitabilityResult isSuitableMemoryOp(const MachineInstr &MI,
-                                       unsigned PointerReg,
+                                       Register PointerReg,
                                        ArrayRef<MachineInstr *> PrevInsts);
 
   /// Returns true if \p DependenceMI can clobber the liveIns in NullSucc block
@@ -226,8 +226,7 @@ public:
   }
 
   MachineFunctionProperties getRequiredProperties() const override {
-    return MachineFunctionProperties().set(
-        MachineFunctionProperties::Property::NoVRegs);
+    return MachineFunctionProperties().setNoVRegs();
   }
 };
 
@@ -317,7 +316,7 @@ bool ImplicitNullChecks::runOnMachineFunction(MachineFunction &MF) {
 
 // Return true if any register aliasing \p Reg is live-in into \p MBB.
 static bool AnyAliasLiveIn(const TargetRegisterInfo *TRI,
-                           MachineBasicBlock *MBB, unsigned Reg) {
+                           MachineBasicBlock *MBB, Register Reg) {
   for (MCRegAliasIterator AR(Reg, TRI, /*IncludeSelf*/ true); AR.isValid();
        ++AR)
     if (MBB->isLiveIn(*AR))
@@ -362,7 +361,7 @@ ImplicitNullChecks::areMemoryOpsAliased(const MachineInstr &MI,
 
 ImplicitNullChecks::SuitabilityResult
 ImplicitNullChecks::isSuitableMemoryOp(const MachineInstr &MI,
-                                       unsigned PointerReg,
+                                       Register PointerReg,
                                        ArrayRef<MachineInstr *> PrevInsts) {
   // Implementation restriction for faulting_op insertion
   // TODO: This could be relaxed if we find a test case which warrants it.
@@ -372,7 +371,7 @@ ImplicitNullChecks::isSuitableMemoryOp(const MachineInstr &MI,
   if (!MI.mayLoadOrStore() || MI.isPredicable())
     return SR_Unsuitable;
   auto AM = TII->getAddrModeFromMemoryOp(MI, TRI);
-  if (!AM)
+  if (!AM || AM->Form != ExtAddrMode::Formula::Basic)
     return SR_Unsuitable;
   auto AddrMode = *AM;
   const Register BaseReg = AddrMode.BaseReg, ScaledReg = AddrMode.ScaledReg;
@@ -706,14 +705,11 @@ bool ImplicitNullChecks::analyzeBlockForNullChecks(
 /// faults.  The FAULTING instruction is inserted at the end of MBB.
 MachineInstr *ImplicitNullChecks::insertFaultingInstr(
     MachineInstr *MI, MachineBasicBlock *MBB, MachineBasicBlock *HandlerMBB) {
-  const unsigned NoRegister = 0; // Guaranteed to be the NoRegister value for
-                                 // all targets.
-
   DebugLoc DL;
   unsigned NumDefs = MI->getDesc().getNumDefs();
   assert(NumDefs <= 1 && "other cases unhandled!");
 
-  unsigned DefReg = NoRegister;
+  Register DefReg;
   if (NumDefs != 0) {
     DefReg = MI->getOperand(0).getReg();
     assert(NumDefs == 1 && "expected exactly one def!");
@@ -778,9 +774,7 @@ void ImplicitNullChecks::rewriteNullChecks(
     // The original operation may define implicit-defs alongside
     // the value.
     MachineBasicBlock *MBB = NC.getMemOperation()->getParent();
-    for (const MachineOperand &MO : FaultingInstr->operands()) {
-      if (!MO.isReg() || !MO.isDef())
-        continue;
+    for (const MachineOperand &MO : FaultingInstr->all_defs()) {
       Register Reg = MO.getReg();
       if (!Reg || MBB->isLiveIn(Reg))
         continue;
@@ -788,8 +782,8 @@ void ImplicitNullChecks::rewriteNullChecks(
     }
 
     if (auto *DepMI = NC.getOnlyDependency()) {
-      for (auto &MO : DepMI->operands()) {
-        if (!MO.isReg() || !MO.getReg() || !MO.isDef() || MO.isDead())
+      for (auto &MO : DepMI->all_defs()) {
+        if (!MO.getReg() || MO.isDead())
           continue;
         if (!NC.getNotNullSucc()->isLiveIn(MO.getReg()))
           NC.getNotNullSucc()->addLiveIn(MO.getReg());
@@ -803,7 +797,7 @@ void ImplicitNullChecks::rewriteNullChecks(
     // Insert an *unconditional* branch to not-null successor - we expect
     // block placement to remove fallthroughs later.
     TII->insertBranch(*NC.getCheckBlock(), NC.getNotNullSucc(), nullptr,
-                      /*Cond=*/std::nullopt, DL);
+                      /*Cond=*/{}, DL);
 
     NumImplicitNullChecks++;
   }

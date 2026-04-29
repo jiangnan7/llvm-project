@@ -21,6 +21,7 @@
 #include "llvm/ADT/ArrayRef.h"
 
 namespace clang {
+class FileManager;
 
 namespace tok {
 enum TokenKind : unsigned short;
@@ -68,6 +69,7 @@ enum DirectiveKind : uint8_t {
   pp_pragma_push_macro,
   pp_pragma_pop_macro,
   pp_pragma_include_alias,
+  pp_pragma_system_header,
   pp_include_next,
   pp_if,
   pp_ifdef,
@@ -134,6 +136,19 @@ void printDependencyDirectivesAsSource(
     ArrayRef<dependency_directives_scan::Directive> Directives,
     llvm::raw_ostream &OS);
 
+/// Functor that returns the dependency directives for a given file.
+class DependencyDirectivesGetter {
+public:
+  /// Clone the getter for a new \c FileManager instance.
+  virtual std::unique_ptr<DependencyDirectivesGetter>
+  cloneFor(FileManager &FileMgr) = 0;
+
+  /// Get the dependency directives for the given file.
+  virtual std::optional<ArrayRef<dependency_directives_scan::Directive>>
+  operator()(FileEntryRef File) = 0;
+
+  virtual ~DependencyDirectivesGetter() = default;
+};
 } // end namespace clang
 
 #endif // LLVM_CLANG_LEX_DEPENDENCYDIRECTIVESSCANNER_H

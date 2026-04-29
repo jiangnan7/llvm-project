@@ -23,14 +23,19 @@ unittest("AnalysisTests") {
     "CallGraphTest.cpp",
     "CaptureTrackingTest.cpp",
     "ConstraintSystemTest.cpp",
+    "CtxProfAnalysisTest.cpp",
     "DDGTest.cpp",
-    "DivergenceAnalysisTest.cpp",
+    "DXILResourceTest.cpp",
     "DomTreeUpdaterTest.cpp",
+    "EphemeralValuesCacheTest.cpp",
     "FunctionPropertiesAnalysisTest.cpp",
     "GlobalsModRefTest.cpp",
+    "GraphWriterTest.cpp",
+    "IR2VecTest.cpp",
     "IRSimilarityIdentifierTest.cpp",
     "IVDescriptorsTest.cpp",
     "InlineCostTest.cpp",
+    "LastRunTrackingAnalysisTest.cpp",
     "LazyCallGraphTest.cpp",
     "LoadsTest.cpp",
     "LoopInfoTest.cpp",
@@ -41,7 +46,9 @@ unittest("AnalysisTests") {
     "MemorySSATest.cpp",
     "PhiValuesTest.cpp",
     "PluginInlineAdvisorAnalysisTest.cpp",
+    "PluginInlineOrderAnalysisTest.cpp",
     "ProfileSummaryInfoTest.cpp",
+    "ReplaceWithVecLibTest.cpp",
     "ScalarEvolutionTest.cpp",
     "SparsePropagation.cpp",
     "TBAATest.cpp",
@@ -50,7 +57,6 @@ unittest("AnalysisTests") {
     "UnrollAnalyzerTest.cpp",
     "ValueLatticeTest.cpp",
     "ValueTrackingTest.cpp",
-    "VectorFunctionABITest.cpp",
     "VectorUtilsTest.cpp",
   ]
 
@@ -58,7 +64,10 @@ unittest("AnalysisTests") {
   # Otherwise, reconfiguring with plugins disabled will leave behind a stale
   # executable.
   if (host_os != "win") {
-    deps += [ "InlineAdvisorPlugin" ]
+    deps += [
+      "InlineAdvisorPlugin",
+      "InlineOrderPlugin",
+    ]
   }
 
   # Support plugins.

@@ -10,7 +10,6 @@
 #include "Perf.h"
 #include "Plugins/Process/POSIX/ProcessPOSIXLog.h"
 #include "Procfs.h"
-#include "lldb/Host/linux/Support.h"
 #include "lldb/Utility/StreamString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -81,7 +80,7 @@ static std::optional<int> GetCGroupFileDescriptor(lldb::pid_t pid) {
     if (line.find("0:") != 0)
       continue;
 
-    std::string slice = line.substr(line.find_first_of("/"));
+    std::string slice = line.substr(line.find_first_of('/'));
     if (slice.empty())
       return std::nullopt;
     std::string cgroup_file = formatv("/sys/fs/cgroup/{0}", slice);

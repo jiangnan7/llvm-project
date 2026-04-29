@@ -13,9 +13,7 @@
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/ASTMatchers/ASTMatchersInternal.h"
 #include "clang/ASTMatchers/ASTMatchersMacros.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/raw_ostream.h"
 
 using namespace clang::ast_matchers;
 
@@ -72,8 +70,8 @@ void NonTrivialTypesLibcMemoryCallsCheck::registerMatchers(
     return expr(unaryOperator(
         hasOperatorName("&"),
         hasUnaryOperand(declRefExpr(
-            allOf(hasType(cxxRecordDecl(Constraint)),
-                  hasType(Bind ? qualType().bind("Record") : qualType()))))));
+            hasType(cxxRecordDecl(Constraint)),
+            hasType(Bind ? qualType().bind("Record") : qualType())))));
   };
   auto IsRecordSizeOf =
       expr(sizeOfExpr(hasArgumentOfType(equalsBoundNode("Record"))));

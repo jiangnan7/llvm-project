@@ -18,8 +18,10 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+#include "llvm/Support/Compiler.h"
 #include <functional>
 
 namespace llvm {
@@ -28,8 +30,8 @@ namespace fuzzerop {
 
 /// @{
 /// Populate a small list of potentially interesting constants of a given type.
-void makeConstantsWithType(Type *T, std::vector<Constant *> &Cs);
-std::vector<Constant *> makeConstantsWithType(Type *T);
+LLVM_ABI void makeConstantsWithType(Type *T, std::vector<Constant *> &Cs);
+LLVM_ABI std::vector<Constant *> makeConstantsWithType(Type *T);
 /// @}
 
 /// A matcher/generator for finding suitable values for the next source in an
@@ -62,7 +64,7 @@ public:
       // Default filter just calls Pred on each of the base types.
       std::vector<Constant *> Result;
       for (Type *T : BaseTypes) {
-        Constant *V = UndefValue::get(T);
+        Constant *V = PoisonValue::get(T);
         if (Pred(Cur, V))
           makeConstantsWithType(T, Result);
       }
@@ -88,7 +90,7 @@ public:
 struct OpDescriptor {
   unsigned Weight;
   SmallVector<SourcePred, 2> SourcePreds;
-  std::function<Value *(ArrayRef<Value *>, Instruction *)> BuilderFunc;
+  std::function<Value *(ArrayRef<Value *>, BasicBlock::iterator)> BuilderFunc;
 };
 
 static inline SourcePred onlyType(Type *Only) {
@@ -117,12 +119,33 @@ static inline SourcePred anyIntType() {
   return {Pred, Make};
 }
 
+static inline SourcePred anyIntOrVecIntType() {
+  auto Pred = [](ArrayRef<Value *>, const Value *V) {
+    return V->getType()->isIntOrIntVectorTy();
+  };
+  return {Pred, std::nullopt};
+}
+
+static inline SourcePred boolOrVecBoolType() {
+  auto Pred = [](ArrayRef<Value *>, const Value *V) {
+    return V->getType()->isIntOrIntVectorTy(1);
+  };
+  return {Pred, std::nullopt};
+}
+
 static inline SourcePred anyFloatType() {
   auto Pred = [](ArrayRef<Value *>, const Value *V) {
     return V->getType()->isFloatingPointTy();
   };
   auto Make = std::nullopt;
   return {Pred, Make};
+}
+
+static inline SourcePred anyFloatOrVecFloatType() {
+  auto Pred = [](ArrayRef<Value *>, const Value *V) {
+    return V->getType()->isFPOrFPVectorTy();
+  };
+  return {Pred, std::nullopt};
 }
 
 static inline SourcePred anyPtrType() {
@@ -133,7 +156,8 @@ static inline SourcePred anyPtrType() {
     std::vector<Constant *> Result;
     // TODO: Should these point at something?
     for (Type *T : Ts)
-      Result.push_back(UndefValue::get(PointerType::getUnqual(T)));
+      Result.push_back(
+          PoisonValue::get(PointerType::getUnqual(T->getContext())));
     return Result;
   };
   return {Pred, Make};
@@ -144,19 +168,67 @@ static inline SourcePred sizedPtrType() {
     if (V->isSwiftError())
       return false;
 
-    if (const auto *PtrT = dyn_cast<PointerType>(V->getType()))
-      return PtrT->isOpaque() ||
-             PtrT->getNonOpaquePointerElementType()->isSized();
-    return false;
+    return V->getType()->isPointerTy();
   };
   auto Make = [](ArrayRef<Value *>, ArrayRef<Type *> Ts) {
     std::vector<Constant *> Result;
 
+    // TODO: This doesn't really make sense with opaque pointers,
+    // as the pointer type will always be the same.
     for (Type *T : Ts)
       if (T->isSized())
-        Result.push_back(UndefValue::get(PointerType::getUnqual(T)));
+        Result.push_back(
+            PoisonValue::get(PointerType::getUnqual(T->getContext())));
 
     return Result;
+  };
+  return {Pred, Make};
+}
+
+static inline SourcePred matchFirstLengthWAnyType() {
+  auto Pred = [](ArrayRef<Value *> Cur, const Value *V) {
+    assert(!Cur.empty() && "No first source yet");
+    Type *This = V->getType(), *First = Cur[0]->getType();
+    VectorType *ThisVec = dyn_cast<VectorType>(This);
+    VectorType *FirstVec = dyn_cast<VectorType>(First);
+    if (ThisVec && FirstVec) {
+      return ThisVec->getElementCount() == FirstVec->getElementCount();
+    }
+    return (ThisVec == nullptr) && (FirstVec == nullptr) && (!This->isVoidTy());
+  };
+  auto Make = [](ArrayRef<Value *> Cur, ArrayRef<Type *> BaseTypes) {
+    assert(!Cur.empty() && "No first source yet");
+    std::vector<Constant *> Result;
+    ElementCount EC;
+    bool isVec = false;
+    if (VectorType *VecTy = dyn_cast<VectorType>(Cur[0]->getType())) {
+      EC = VecTy->getElementCount();
+      isVec = true;
+    }
+    for (Type *T : BaseTypes) {
+      if (VectorType::isValidElementType(T)) {
+        if (isVec)
+          // If the first pred is <i1 x N>, make the result <T x N>
+          makeConstantsWithType(VectorType::get(T, EC), Result);
+        else
+          makeConstantsWithType(T, Result);
+      }
+    }
+    assert(!Result.empty() && "No potential constants.");
+    return Result;
+  };
+  return {Pred, Make};
+}
+
+/// Match values that have the same type as the first source.
+static inline SourcePred matchSecondType() {
+  auto Pred = [](ArrayRef<Value *> Cur, const Value *V) {
+    assert((Cur.size() > 1) && "No second source yet");
+    return V->getType() == Cur[1]->getType();
+  };
+  auto Make = [](ArrayRef<Value *> Cur, ArrayRef<Type *>) {
+    assert((Cur.size() > 1) && "No second source yet");
+    return makeConstantsWithType(Cur[1]->getType());
   };
   return {Pred, Make};
 }

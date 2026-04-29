@@ -6,11 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++03
+// REQUIRES: can-create-symlinks
+// UNSUPPORTED: c++03, c++11, c++14
+// UNSUPPORTED: no-filesystem
+// UNSUPPORTED: availability-filesystem-missing
 
 // The string reported on errors changed, which makes those tests fail when run
-// against already-released libc++'s.
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx{{10.15|11.0}}
+// against a built library that doesn't contain 0aa637b2037d.
+// XFAIL: using-built-library-before-llvm-13
 
 // <filesystem>
 
@@ -20,7 +23,7 @@
 // void last_write_time(const path& p, file_time_type new_type,
 //                      std::error_code& ec) noexcept;
 
-#include "filesystem_include.h"
+#include <filesystem>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -38,7 +41,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #endif
-
+namespace fs = std::filesystem;
 using namespace fs;
 
 using Sec = std::chrono::duration<file_time_type::rep>;
@@ -51,8 +54,8 @@ using std::chrono::duration_cast;
 
 #ifdef _WIN32
 struct TimeSpec {
-  int64_t tv_sec;
-  int64_t tv_nsec;
+  std::int64_t tv_sec;
+  std::int64_t tv_nsec;
 };
 struct StatT {
   TimeSpec st_atim;
@@ -60,7 +63,7 @@ struct StatT {
 };
 // There were 369 years and 89 leap days from the Windows epoch
 // (1601) to the Unix epoch (1970).
-#define FILE_TIME_OFFSET_SECS (uint64_t(369 * 365 + 89) * (24 * 60 * 60))
+#define FILE_TIME_OFFSET_SECS (std::uint64_t(369 * 365 + 89) * (24 * 60 * 60))
 static TimeSpec filetime_to_timespec(LARGE_INTEGER li) {
   TimeSpec ret;
   ret.tv_sec = li.QuadPart / 10000000 - FILE_TIME_OFFSET_SECS;
@@ -297,7 +300,7 @@ static const bool SupportsMinRoundTrip = [] {
   return min_val == file_time_type::min();
 }();
 
-} // end namespace
+} // namespace
 
 static bool CompareTime(TimeSpec t1, TimeSpec t2) {
   if (SupportsNanosecondRoundTrip)

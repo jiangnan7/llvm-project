@@ -39,7 +39,7 @@ def SDT_LanaiAdjDynAlloc  : SDTypeProfile<1,  1, [SDTCisVT<0, i32>,
 def Call             : SDNode<"LanaiISD::CALL", SDT_LanaiCall,
                               [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                                SDNPVariadic]>;
-def RetFlag          : SDNode<"LanaiISD::RET_FLAG", SDTNone,
+def RetGlue          : SDNode<"LanaiISD::RET_GLUE", SDTNone,
                               [SDNPHasChain, SDNPOptInGlue, SDNPVariadic]>;
 def CallSeqStart     : SDNode<"ISD::CALLSEQ_START", SDT_LanaiCallSeqStart,
                               [SDNPHasChain, SDNPOutGlue]>;
@@ -74,7 +74,8 @@ def HI16 : SDNodeXForm<imm, [{
 }]>;
 
 def NEG : SDNodeXForm<imm, [{
-  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N), MVT::i32);
+  return CurDAG->getSignedTargetConstant(-N->getSExtValue(), SDLoc(N),
+                                         MVT::i32);
 }]>;
 
 def LO21 : SDNodeXForm<imm, [{
@@ -732,7 +733,7 @@ let isReturn = 1, isTerminator = 1, hasDelaySlot = 1, isBarrier = 1,
     Uses = [RCA] in {
   def RET : InstRM<0b0, (outs), (ins),
                    "ld\t-4[%fp], %pc ! return",
-                   [(RetFlag)]> {
+                   [(RetGlue)]> {
     let Rd = PC.Num;
     let Rs1 = FP.Num;
     let P = 1;
@@ -844,7 +845,7 @@ def : Pat<(extloadi16 ADDRspls:$src), (i32 (LDHz_RI ADDRspls:$src))>;
 // Loads up to 32-bits are already atomic.
 // TODO: This is a workaround for a particular failing case and should be
 // handled more generally.
-def : Pat<(atomic_load_8  ADDRspls:$src), (i32 (LDBz_RI ADDRspls:$src))>;
+def : Pat<(atomic_load_azext_8  ADDRspls:$src), (i32 (LDBz_RI ADDRspls:$src))>;
 
 // GlobalAddress, ExternalSymbol, Jumptable, ConstantPool
 def : Pat<(LanaiHi tglobaladdr:$dst), (MOVHI tglobaladdr:$dst)>;

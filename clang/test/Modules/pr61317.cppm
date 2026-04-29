@@ -8,12 +8,21 @@
 // RUN:     -fprebuilt-module-path=%t
 // RUN: %clang_cc1 -std=c++20 %t/Use.cpp -fprebuilt-module-path=%t -fsyntax-only -verify
 
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
+// RUN: split-file %s %t
+//
+// RUN: %clang_cc1 -std=c++20 %t/A.cppm -emit-reduced-module-interface -o %t/A.pcm
+// RUN: %clang_cc1 -std=c++20 %t/B.cppm -emit-reduced-module-interface -o %t/B.pcm \
+// RUN:     -fprebuilt-module-path=%t
+// RUN: %clang_cc1 -std=c++20 %t/Use.cpp -fprebuilt-module-path=%t -fsyntax-only -verify
+
 //--- foo.h
 #ifndef _FOO
 #define _FOO
 
 template <typename T> struct Foo {
-  Foo(T) {}
+  Foo(T f) {}
 };
 
 template <typename T> Foo(T&) -> Foo<T>;
@@ -24,6 +33,16 @@ struct Bar {
   void baz() const {}
 };
 
+template <typename T> struct Foo2 {
+  Foo2(T f) {}
+};
+
+struct Bar2 {
+  template <typename T>
+    requires requires { Foo2{T()}; }
+  void baz2() const {}
+};
+
 #endif
 
 //--- A.cppm
@@ -32,6 +51,7 @@ module;
 export module A;
 export using ::Foo;
 export using ::Bar;
+export using ::Bar2;
 
 //--- B.cppm
 module;
@@ -46,4 +66,7 @@ import B;
 void use() {
   Bar _; 
   _.baz<int>();
+
+  Bar2 __; 
+  __.baz2<int>();
 }

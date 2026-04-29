@@ -28,14 +28,11 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/KnownBits.h"
@@ -48,33 +45,8 @@ using namespace llvm::PatternMatch;
 
 #define DEBUG_TYPE "demanded-bits"
 
-char DemandedBitsWrapperPass::ID = 0;
-
-INITIALIZE_PASS_BEGIN(DemandedBitsWrapperPass, "demanded-bits",
-                      "Demanded bits analysis", false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
-INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_END(DemandedBitsWrapperPass, "demanded-bits",
-                    "Demanded bits analysis", false, false)
-
-DemandedBitsWrapperPass::DemandedBitsWrapperPass() : FunctionPass(ID) {
-  initializeDemandedBitsWrapperPassPass(*PassRegistry::getPassRegistry());
-}
-
-void DemandedBitsWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
-  AU.setPreservesCFG();
-  AU.addRequired<AssumptionCacheTracker>();
-  AU.addRequired<DominatorTreeWrapperPass>();
-  AU.setPreservesAll();
-}
-
-void DemandedBitsWrapperPass::print(raw_ostream &OS, const Module *M) const {
-  DB->print(OS);
-}
-
 static bool isAlwaysLive(Instruction *I) {
-  return I->isTerminator() || isa<DbgInfoIntrinsic>(I) || I->isEHPad() ||
-         I->mayHaveSideEffects();
+  return I->isTerminator() || I->isEHPad() || I->mayHaveSideEffects();
 }
 
 void DemandedBits::determineLiveOperandBits(
@@ -95,13 +67,13 @@ void DemandedBits::determineLiveOperandBits(
           return;
         KnownBitsComputed = true;
 
-        const DataLayout &DL = UserI->getModule()->getDataLayout();
+        const DataLayout &DL = UserI->getDataLayout();
         Known = KnownBits(BitWidth);
-        computeKnownBits(V1, Known, DL, 0, &AC, UserI, &DT);
+        computeKnownBits(V1, Known, DL, &AC, UserI, &DT);
 
         if (V2) {
           Known2 = KnownBits(BitWidth);
-          computeKnownBits(V2, Known2, DL, 0, &AC, UserI, &DT);
+          computeKnownBits(V2, Known2, DL, &AC, UserI, &DT);
         }
       };
 
@@ -310,17 +282,6 @@ void DemandedBits::determineLiveOperandBits(
   }
 }
 
-bool DemandedBitsWrapperPass::runOnFunction(Function &F) {
-  auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
-  auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
-  DB.emplace(F, AC, DT);
-  return false;
-}
-
-void DemandedBitsWrapperPass::releaseMemory() {
-  DB.reset();
-}
-
 void DemandedBits::performAnalysis() {
   if (Analyzed)
     // Analysis already completed for this function.
@@ -441,14 +402,14 @@ APInt DemandedBits::getDemandedBits(Instruction *I) {
   if (Found != AliveBits.end())
     return Found->second;
 
-  const DataLayout &DL = I->getModule()->getDataLayout();
+  const DataLayout &DL = I->getDataLayout();
   return APInt::getAllOnes(DL.getTypeSizeInBits(I->getType()->getScalarType()));
 }
 
 APInt DemandedBits::getDemandedBits(Use *U) {
   Type *T = (*U)->getType();
   auto *UserI = cast<Instruction>(U->getUser());
-  const DataLayout &DL = UserI->getModule()->getDataLayout();
+  const DataLayout &DL = UserI->getDataLayout();
   unsigned BitWidth = DL.getTypeSizeInBits(T->getScalarType());
 
   // We only track integer uses, everything else produces a mask with all bits
@@ -514,6 +475,7 @@ void DemandedBits::print(raw_ostream &OS) {
     OS << *I << '\n';
   };
 
+  OS << "Printing analysis 'Demanded Bits Analysis' for function '" << F.getName() << "':\n";
   performAnalysis();
   for (auto &KV : AliveBits) {
     Instruction *I = KV.first;
@@ -603,10 +565,6 @@ APInt DemandedBits::determineLiveOperandBitsSub(unsigned OperandNo,
   NRHS.One = RHS.Zero;
   return determineLiveOperandBitsAddCarry(OperandNo, AOut, LHS, NRHS, false,
                                           true);
-}
-
-FunctionPass *llvm::createDemandedBitsWrapperPass() {
-  return new DemandedBitsWrapperPass();
 }
 
 AnalysisKey DemandedBitsAnalysis::Key;

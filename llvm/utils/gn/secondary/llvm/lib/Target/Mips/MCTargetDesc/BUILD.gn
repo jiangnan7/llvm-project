@@ -51,6 +51,7 @@ static_library("MCTargetDesc") {
   deps = [
     ":MipsGenAsmWriter",
     ":MipsGenMCCodeEmitter",
+    "//llvm/lib/CodeGen",
     "//llvm/lib/MC",
     "//llvm/lib/Support",
     "//llvm/lib/Target/Mips/TargetInfo",
@@ -66,10 +67,11 @@ static_library("MCTargetDesc") {
     "MipsInstPrinter.cpp",
     "MipsMCAsmInfo.cpp",
     "MipsMCCodeEmitter.cpp",
-    "MipsMCExpr.cpp",
     "MipsMCTargetDesc.cpp",
     "MipsNaClELFStreamer.cpp",
     "MipsOptionRecord.cpp",
     "MipsTargetStreamer.cpp",
+    "MipsWinCOFFObjectWriter.cpp",
+    "MipsWinCOFFStreamer.cpp",
   ]
 }

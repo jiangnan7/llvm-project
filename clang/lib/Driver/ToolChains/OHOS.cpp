@@ -8,11 +8,10 @@
 
 #include "OHOS.h"
 #include "Arch/ARM.h"
-#include "CommonArgs.h"
 #include "clang/Config/config.h"
+#include "clang/Driver/CommonArgs.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
-#include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/SanitizerArgs.h"
 #include "llvm/Option/ArgList.h"
@@ -20,7 +19,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualFileSystem.h"
-#include "llvm/Support/ScopedPrinter.h"
 
 using namespace clang::driver;
 using namespace clang::driver::toolchains;
@@ -32,23 +30,26 @@ using namespace clang::driver::tools::arm;
 using tools::addMultilibFlag;
 using tools::addPathIfExists;
 
-static bool findOHOSMuslMultilibs(const Multilib::flags_list &Flags,
+static bool findOHOSMuslMultilibs(const Driver &D,
+                                  const Multilib::flags_list &Flags,
                                   DetectedMultilibs &Result) {
   MultilibSet Multilibs;
   Multilibs.push_back(Multilib());
   // -mcpu=cortex-a7
   // -mfloat-abi=soft -mfloat-abi=softfp -mfloat-abi=hard
   // -mfpu=neon-vfpv4
-  Multilibs.push_back(Multilib("/a7_soft", {}, {}, 1,
-                          {"+mcpu=cortex-a7", "+mfloat-abi=soft"}));
+  Multilibs.push_back(
+      Multilib("/a7_soft", {}, {}, {"-mcpu=cortex-a7", "-mfloat-abi=soft"}));
 
-  Multilibs.push_back(Multilib("/a7_softfp_neon-vfpv4", {}, {}, 1,
-                          {"+mcpu=cortex-a7", "+mfloat-abi=softfp", "+mfpu=neon-vfpv4"}));
+  Multilibs.push_back(
+      Multilib("/a7_softfp_neon-vfpv4", {}, {},
+               {"-mcpu=cortex-a7", "-mfloat-abi=softfp", "-mfpu=neon-vfpv4"}));
 
-  Multilibs.push_back(Multilib("/a7_hard_neon-vfpv4", {}, {}, 1,
-                          {"+mcpu=cortex-a7", "+mfloat-abi=hard", "+mfpu=neon-vfpv4"}));
+  Multilibs.push_back(
+      Multilib("/a7_hard_neon-vfpv4", {}, {},
+               {"-mcpu=cortex-a7", "-mfloat-abi=hard", "-mfpu=neon-vfpv4"}));
 
-  if (Multilibs.select(Flags, Result.SelectedMultilib)) {
+  if (Multilibs.select(D, Flags, Result.SelectedMultilibs)) {
     Result.Multilibs = Multilibs;
     return true;
   }
@@ -64,22 +65,22 @@ static bool findOHOSMultilibs(const Driver &D,
   bool IsA7 = false;
   if (const Arg *A = Args.getLastArg(options::OPT_mcpu_EQ))
     IsA7 = A->getValue() == StringRef("cortex-a7");
-  addMultilibFlag(IsA7, "mcpu=cortex-a7", Flags);
+  addMultilibFlag(IsA7, "-mcpu=cortex-a7", Flags);
 
   bool IsMFPU = false;
   if (const Arg *A = Args.getLastArg(options::OPT_mfpu_EQ))
     IsMFPU = A->getValue() == StringRef("neon-vfpv4");
-  addMultilibFlag(IsMFPU, "mfpu=neon-vfpv4", Flags);
+  addMultilibFlag(IsMFPU, "-mfpu=neon-vfpv4", Flags);
 
   tools::arm::FloatABI ARMFloatABI = getARMFloatABI(D, TargetTriple, Args);
   addMultilibFlag((ARMFloatABI == tools::arm::FloatABI::Soft),
-      "mfloat-abi=soft", Flags);
+                  "-mfloat-abi=soft", Flags);
   addMultilibFlag((ARMFloatABI == tools::arm::FloatABI::SoftFP),
-      "mfloat-abi=softfp", Flags);
+                  "-mfloat-abi=softfp", Flags);
   addMultilibFlag((ARMFloatABI == tools::arm::FloatABI::Hard),
-      "mfloat-abi=hard", Flags);
+                  "-mfloat-abi=hard", Flags);
 
-  return findOHOSMuslMultilibs(Flags, Result);
+  return findOHOSMuslMultilibs(D, Flags, Result);
 }
 
 std::string OHOS::getMultiarchTriple(const llvm::Triple &T) const {
@@ -108,6 +109,8 @@ std::string OHOS::getMultiarchTriple(const llvm::Triple &T) const {
     return "x86_64-linux-ohos";
   case llvm::Triple::aarch64:
     return "aarch64-linux-ohos";
+  case llvm::Triple::loongarch64:
+    return "loongarch64-linux-ohos";
   }
   return T.str();
 }
@@ -134,12 +137,15 @@ OHOS::OHOS(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   DetectedMultilibs Result;
   findOHOSMultilibs(D, *this, Triple, "", Args, Result);
   Multilibs = Result.Multilibs;
-  SelectedMultilib = Result.SelectedMultilib;
+  SelectedMultilibs = Result.SelectedMultilibs;
+  if (!SelectedMultilibs.empty()) {
+    SelectedMultilib = SelectedMultilibs.back();
+  }
 
   getFilePaths().clear();
-  std::string CandidateLibPath = getArchSpecificLibPath();
-  if (getVFS().exists(CandidateLibPath))
-    getFilePaths().push_back(CandidateLibPath);
+  for (const auto &CandidateLibPath : getArchSpecificLibPaths())
+    if (getVFS().exists(CandidateLibPath))
+      getFilePaths().push_back(CandidateLibPath);
 
   getLibraryPaths().clear();
   for (auto &Path : getRuntimePaths())
@@ -269,7 +275,7 @@ std::string OHOS::computeSysRoot() const {
   std::string SysRoot =
       !getDriver().SysRoot.empty()
           ? getDriver().SysRoot
-          : makePath({getDriver().getInstalledDir(), "..", "..", "sysroot"});
+          : makePath({getDriver().Dir, "..", "..", "sysroot"});
   if (!llvm::sys::fs::exists(SysRoot))
     return std::string();
 
@@ -295,7 +301,6 @@ ToolChain::path_list OHOS::getRuntimePaths() const {
 
   // Third try the effective triple.
   P.assign(D.ResourceDir);
-  std::string SysRoot = computeSysRoot();
   llvm::sys::path::append(P, "lib", getMultiarchTriple(Triple),
                           SelectedMultilib.gccSuffix());
   Paths.push_back(P.c_str());
@@ -333,7 +338,7 @@ std::string OHOS::getDynamicLinker(const ArgList &Args) const {
 }
 
 std::string OHOS::getCompilerRT(const ArgList &Args, StringRef Component,
-                                FileType Type) const {
+                                FileType Type, bool IsFortran) const {
   SmallString<128> Path(getDriver().ResourceDir);
   llvm::sys::path::append(Path, "lib", getMultiarchTriple(getTriple()),
                           SelectedMultilib.gccSuffix());
@@ -362,7 +367,9 @@ void OHOS::addExtraOpts(llvm::opt::ArgStringList &CmdArgs) const {
   CmdArgs.push_back("-z");
   CmdArgs.push_back("relro");
   CmdArgs.push_back("-z");
-  CmdArgs.push_back("max-page-size=4096");
+  CmdArgs.push_back(getArch() == llvm::Triple::loongarch64
+                        ? "max-page-size=16384"
+                        : "max-page-size=4096");
   // .gnu.hash section is not compatible with the MIPS target
   if (getArch() != llvm::Triple::mipsel)
     CmdArgs.push_back("--hash-style=both");
@@ -399,13 +406,16 @@ void OHOS::addProfileRTLibs(const llvm::opt::ArgList &Args,
   ToolChain::addProfileRTLibs(Args, CmdArgs);
 }
 
-std::string OHOS::getArchSpecificLibPath() const {
+ToolChain::path_list OHOS::getArchSpecificLibPaths() const {
+  ToolChain::path_list Paths;
   llvm::Triple Triple = getTriple();
-  return makePath({getDriver().ResourceDir, "lib", getMultiarchTriple(Triple)});
+  Paths.push_back(
+      makePath({getDriver().ResourceDir, "lib", getMultiarchTriple(Triple)}));
+  return Paths;
 }
 
 ToolChain::UnwindLibType OHOS::GetUnwindLibType(const llvm::opt::ArgList &Args) const {
-  if (const Arg *A = Args.getLastArg(options::OPT_unwindlib_EQ))
+  if (Args.getLastArg(options::OPT_unwindlib_EQ))
     return Generic_ELF::GetUnwindLibType(Args);
   return GetDefaultUnwindLibType();
 }

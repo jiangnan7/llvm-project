@@ -18,6 +18,7 @@
 #include "mlir/TableGen/Attribute.h"
 #include "mlir/TableGen/Builder.h"
 #include "mlir/TableGen/Dialect.h"
+#include "mlir/TableGen/Property.h"
 #include "mlir/TableGen/Region.h"
 #include "mlir/TableGen/Successor.h"
 #include "mlir/TableGen/Trait.h"
@@ -118,14 +119,15 @@ public:
 
   /// A utility iterator over a list of variable decorators.
   struct VariableDecoratorIterator
-      : public llvm::mapped_iterator<llvm::Init *const *,
-                                     VariableDecorator (*)(llvm::Init *)> {
+      : public llvm::mapped_iterator<const llvm::Init *const *,
+                                     VariableDecorator (*)(
+                                         const llvm::Init *)> {
     /// Initializes the iterator to the specified iterator.
-    VariableDecoratorIterator(llvm::Init *const *it)
-        : llvm::mapped_iterator<llvm::Init *const *,
-                                VariableDecorator (*)(llvm::Init *)>(it,
-                                                                     &unwrap) {}
-    static VariableDecorator unwrap(llvm::Init *init);
+    VariableDecoratorIterator(const llvm::Init *const *it)
+        : llvm::mapped_iterator<const llvm::Init *const *,
+                                VariableDecorator (*)(const llvm::Init *)>(
+              it, &unwrap) {}
+    static VariableDecorator unwrap(const llvm::Init *init);
   };
   using var_decorator_iterator = VariableDecoratorIterator;
   using var_decorator_range = llvm::iterator_range<VariableDecoratorIterator>;
@@ -166,10 +168,14 @@ public:
   unsigned getNumVariableLengthResults() const;
 
   /// Op attribute iterators.
-  using attribute_iterator = const NamedAttribute *;
-  attribute_iterator attribute_begin() const;
-  attribute_iterator attribute_end() const;
-  llvm::iterator_range<attribute_iterator> getAttributes() const;
+  using const_attribute_iterator = const NamedAttribute *;
+  const_attribute_iterator attribute_begin() const;
+  const_attribute_iterator attribute_end() const;
+  llvm::iterator_range<const_attribute_iterator> getAttributes() const;
+  using attribute_iterator = NamedAttribute *;
+  attribute_iterator attribute_begin();
+  attribute_iterator attribute_end();
+  llvm::iterator_range<attribute_iterator> getAttributes();
 
   int getNumAttributes() const { return attributes.size(); }
   int getNumNativeAttributes() const { return numNativeAttributes; }
@@ -184,6 +190,27 @@ public:
   const_value_iterator operand_begin() const;
   const_value_iterator operand_end() const;
   const_value_range getOperands() const;
+
+  // Op properties iterators.
+  using const_property_iterator = const NamedProperty *;
+  const_property_iterator properties_begin() const {
+    return properties.begin();
+  }
+  const_property_iterator properties_end() const { return properties.end(); }
+  llvm::iterator_range<const_property_iterator> getProperties() const {
+    return properties;
+  }
+  using property_iterator = NamedProperty *;
+  property_iterator properties_begin() { return properties.begin(); }
+  property_iterator properties_end() { return properties.end(); }
+  llvm::iterator_range<property_iterator> getProperties() { return properties; }
+  int getNumCoreAttributes() const { return properties.size(); }
+
+  // Op properties accessors.
+  NamedProperty &getProperty(int index) { return properties[index]; }
+  const NamedProperty &getProperty(int index) const {
+    return properties[index];
+  }
 
   int getNumOperands() const { return operands.size(); }
   NamedTypeConstraint &getOperand(int index) { return operands[index]; }
@@ -326,6 +353,10 @@ public:
 
   bool hasFolder() const;
 
+  /// Whether to generate the `readProperty`/`writeProperty` methods for
+  /// bytecode emission.
+  bool useCustomPropertiesEncoding() const;
+
 private:
   /// Populates the vectors containing operands, attributes, results and traits.
   void populateOpStructure();
@@ -352,6 +383,9 @@ private:
   /// attributes (corresponding to dynamic properties of the operation that are
   /// computed upon request).
   SmallVector<NamedAttribute, 4> attributes;
+
+  /// The properties of the op.
+  SmallVector<NamedProperty, 4> properties;
 
   /// The arguments of the op (operands and native attributes).
   SmallVector<Argument, 4> arguments;

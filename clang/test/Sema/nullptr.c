@@ -16,8 +16,8 @@ nullptr_t f(nullptr_t null)
   p = null;
   int *pi = nullptr;
   pi = null;
-  null = 0; // expected-error {{assigning to 'nullptr_t' from incompatible type 'int'}}
-  bool b = nullptr; // expected-error {{initializing 'bool' with an expression of incompatible type 'nullptr_t'}}
+  null = 0;
+  bool b = nullptr;
 
   // Can't convert nullptr to integral implicitly.
   uintptr_t i = nullptr; // expected-error-re {{initializing 'uintptr_t' (aka '{{.*}}') with an expression of incompatible type 'nullptr_t'}}
@@ -77,6 +77,9 @@ void h() {
 
 static_assert(sizeof(nullptr_t) == sizeof(void*), "");
 
+static_assert(!nullptr, "");
+static_assert(!(bool){nullptr}, "");
+
 static_assert(!(nullptr < nullptr), ""); // expected-error {{invalid operands to binary expression}}
 static_assert(!(nullptr > nullptr), ""); // expected-error {{invalid operands to binary expression}}
 static_assert(  nullptr <= nullptr, ""); // expected-error {{invalid operands to binary expression}}
@@ -105,3 +108,10 @@ void test_f1() {
   int ir = (f1)(nullptr);
 }
 
+// __nullptr keyword in C
+void foo(void *);
+void bar() { foo(__nullptr); }
+static_assert(nullptr == __nullptr);
+static_assert(__nullptr == 0);  // Test that its value matches that of NULL
+static_assert(_Generic(typeof(__nullptr), nullptr_t: true, default: false));
+static_assert(_Generic(__typeof(__nullptr), int : 0, void * : 0, default : 1)); // Test that it's type is not the same as what NULL would generally have.

@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Driver/MultilibBuilder.h"
-#include "llvm/ADT/SmallString.h"
+#include "clang/Driver/CommonArgs.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Regex.h"
@@ -41,9 +41,8 @@ static void normalizePathSegment(std::string &Segment) {
   }
 }
 
-MultilibBuilder::MultilibBuilder(StringRef GCC, StringRef OS, StringRef Include,
-                                 int Priority)
-    : GCCSuffix(GCC), OSSuffix(OS), IncludeSuffix(Include), Priority(Priority) {
+MultilibBuilder::MultilibBuilder(StringRef GCC, StringRef OS, StringRef Include)
+    : GCCSuffix(GCC), OSSuffix(OS), IncludeSuffix(Include) {
   normalizePathSegment(GCCSuffix);
   normalizePathSegment(OSSuffix);
   normalizePathSegment(IncludeSuffix);
@@ -74,28 +73,31 @@ bool MultilibBuilder::isValid() const {
   llvm::StringMap<int> FlagSet;
   for (unsigned I = 0, N = Flags.size(); I != N; ++I) {
     StringRef Flag(Flags[I]);
-    llvm::StringMap<int>::iterator SI = FlagSet.find(Flag.substr(1));
+    auto [SI, Inserted] = FlagSet.try_emplace(Flag.substr(1), I);
 
-    assert(StringRef(Flag).front() == '+' || StringRef(Flag).front() == '-');
+    assert(StringRef(Flag).front() == '-' || StringRef(Flag).front() == '!');
 
-    if (SI == FlagSet.end())
-      FlagSet[Flag.substr(1)] = I;
-    else if (Flags[I] != Flags[SI->getValue()])
+    if (!Inserted && Flags[I] != Flags[SI->getValue()])
       return false;
   }
   return true;
 }
 
+MultilibBuilder &MultilibBuilder::flag(StringRef Flag, bool Disallow) {
+  tools::addMultilibFlag(!Disallow, Flag, Flags);
+  return *this;
+}
+
 Multilib MultilibBuilder::makeMultilib() const {
-  return Multilib(GCCSuffix, OSSuffix, IncludeSuffix, Priority, Flags);
+  return Multilib(GCCSuffix, OSSuffix, IncludeSuffix, Flags);
 }
 
 MultilibSetBuilder &MultilibSetBuilder::Maybe(const MultilibBuilder &M) {
   MultilibBuilder Opposite;
-  // Negate any '+' flags
+  // Negate positive flags
   for (StringRef Flag : M.flags()) {
-    if (Flag.front() == '+')
-      Opposite.flags().push_back(("-" + Flag.substr(1)).str());
+    if (Flag.front() == '-')
+      Opposite.flag(Flag, /*Disallow=*/true);
   }
   return Either(M, Opposite);
 }
@@ -140,8 +142,8 @@ static MultilibBuilder compose(const MultilibBuilder &Base,
 
   MultilibBuilder::flags_list &Flags = Composed.flags();
 
-  Flags.insert(Flags.end(), Base.flags().begin(), Base.flags().end());
-  Flags.insert(Flags.end(), New.flags().begin(), New.flags().end());
+  llvm::append_range(Flags, Base.flags());
+  llvm::append_range(Flags, New.flags());
 
   return Composed;
 }
@@ -151,8 +153,7 @@ MultilibSetBuilder::Either(ArrayRef<MultilibBuilder> MultilibSegments) {
   multilib_list Composed;
 
   if (Multilibs.empty())
-    Multilibs.insert(Multilibs.end(), MultilibSegments.begin(),
-                     MultilibSegments.end());
+    llvm::append_range(Multilibs, MultilibSegments);
   else {
     for (const auto &New : MultilibSegments) {
       for (const auto &Base : Multilibs) {

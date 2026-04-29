@@ -35,7 +35,7 @@
 template <class It>
 using Range = std::ranges::subrange<It, sentinel_wrapper<It>>;
 
-template <class V, size_t N>
+template <class V, std::size_t N>
 concept HasElementsView = requires { typename std::ranges::elements_view<V, N>; };
 
 static_assert(HasElementsView<Range<std::ranges::subrange<int*>*>, 0>);
@@ -52,7 +52,6 @@ static_assert(!std::ranges::input_range<Range<cpp20_output_iterator<std::tuple<i
 static_assert(!HasElementsView<Range<cpp20_output_iterator<std::tuple<int>*>>, 0>);
 
 // !tuple-like
-LIBCPP_STATIC_ASSERT(!std::__tuple_like<int>);
 static_assert(!HasElementsView<Range<int*>, 1>);
 
 // !(N < tuple_size_v<T>)

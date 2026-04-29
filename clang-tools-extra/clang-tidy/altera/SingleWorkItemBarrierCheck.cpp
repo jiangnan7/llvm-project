@@ -16,23 +16,22 @@ namespace clang::tidy::altera {
 
 void SingleWorkItemBarrierCheck::registerMatchers(MatchFinder *Finder) {
   // Find any function that calls barrier but does not call an ID function.
-  // hasAttr(attr::Kind::OpenCLKernel) restricts it to only kernel functions.
+  // hasAttr(attr::Kind::DeviceKernel) restricts it to only kernel functions.
   // FIXME: Have it accept all functions but check for a parameter that gets an
   // ID from one of the four ID functions.
   Finder->addMatcher(
       // Find function declarations...
       functionDecl(
-          allOf(
-              // That are OpenCL kernels...
-              hasAttr(attr::Kind::OpenCLKernel),
-              // And call a barrier function (either 1.x or 2.x version)...
-              forEachDescendant(callExpr(callee(functionDecl(hasAnyName(
-                                             "barrier", "work_group_barrier"))))
-                                    .bind("barrier")),
-              // But do not call an ID function.
-              unless(hasDescendant(callExpr(callee(functionDecl(
-                  hasAnyName("get_global_id", "get_local_id", "get_group_id",
-                             "get_local_linear_id"))))))))
+          // That are device kernels...
+          hasAttr(attr::Kind::DeviceKernel),
+          // And call a barrier function (either 1.x or 2.x version)...
+          forEachDescendant(callExpr(callee(functionDecl(hasAnyName(
+                                         "barrier", "work_group_barrier"))))
+                                .bind("barrier")),
+          // But do not call an ID function.
+          unless(hasDescendant(callExpr(callee(functionDecl(
+              hasAnyName("get_global_id", "get_local_id", "get_group_id",
+                         "get_local_linear_id")))))))
           .bind("function"),
       this);
 }
@@ -55,8 +54,12 @@ void SingleWorkItemBarrierCheck::check(const MatchFinder::MatchResult &Result) {
     bool IsNDRange = false;
     if (MatchedDecl->hasAttr<ReqdWorkGroupSizeAttr>()) {
       const auto *Attribute = MatchedDecl->getAttr<ReqdWorkGroupSizeAttr>();
-      if (Attribute->getXDim() > 1 || Attribute->getYDim() > 1 ||
-          Attribute->getZDim() > 1)
+      auto Eval = [&](Expr *E) {
+        return E->EvaluateKnownConstInt(MatchedDecl->getASTContext())
+            .getExtValue();
+      };
+      if (Eval(Attribute->getXDim()) > 1 || Eval(Attribute->getYDim()) > 1 ||
+          Eval(Attribute->getZDim()) > 1)
         IsNDRange = true;
     }
     if (IsNDRange) // No warning if kernel is treated as an NDRange.

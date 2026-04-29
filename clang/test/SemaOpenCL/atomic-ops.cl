@@ -61,8 +61,10 @@ void f(atomic_int *i, const atomic_int *ci,
 
   __opencl_atomic_fetch_min(i, 1, memory_order_seq_cst, memory_scope_work_group);
   __opencl_atomic_fetch_max(i, 1, memory_order_seq_cst, memory_scope_work_group);
-  __opencl_atomic_fetch_min(f, 1, memory_order_seq_cst, memory_scope_work_group); // expected-error {{address argument to atomic operation must be a pointer to atomic integer ('__generic atomic_float *' (aka '__generic _Atomic(float) *') invalid)}}
-  __opencl_atomic_fetch_max(f, 1, memory_order_seq_cst, memory_scope_work_group); // expected-error {{address argument to atomic operation must be a pointer to atomic integer ('__generic atomic_float *' (aka '__generic _Atomic(float) *') invalid)}}
+  __opencl_atomic_fetch_min(f, 1, memory_order_seq_cst, memory_scope_work_group);
+  __opencl_atomic_fetch_max(f, 1, memory_order_seq_cst, memory_scope_work_group);
+  __opencl_atomic_fetch_min(d, 1, memory_order_seq_cst, memory_scope_work_group);
+  __opencl_atomic_fetch_max(d, 1, memory_order_seq_cst, memory_scope_work_group);
 
   bool cmpexch_1 = __opencl_atomic_compare_exchange_strong(i, I, 1, memory_order_seq_cst, memory_order_seq_cst, memory_scope_work_group);
   bool cmpexch_2 = __opencl_atomic_compare_exchange_strong(p, P, 1, memory_order_seq_cst, memory_order_seq_cst, memory_scope_work_group);
@@ -157,7 +159,7 @@ void memory_checks(atomic_int *Ap, int *p, int val) {
   (void)__opencl_atomic_compare_exchange_weak(Ap, p, val, memory_order_seq_cst, memory_order_relaxed, memory_scope_work_group);
 }
 
-void synchscope_checks(atomic_int *Ap, int scope) {
+void syncscope_checks(atomic_int *Ap, int scope) {
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, memory_scope_work_item); // expected-error{{synchronization scope argument to atomic operation is invalid}}
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, memory_scope_work_group);
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, memory_scope_device);
@@ -165,7 +167,7 @@ void synchscope_checks(atomic_int *Ap, int scope) {
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, memory_scope_all_devices);
 #if __OPENCL_C_VERSION__ < CL_VERSION_3_0
   // expected-error@-2{{use of undeclared identifier 'memory_scope_all_devices'}}
-  // expected-note@* {{'memory_scope_all_svm_devices' declared here}}
+  // expected-note@opencl-c-base.h:*{{'memory_scope_all_svm_devices' declared here}}
 #endif
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, memory_scope_sub_group);
   (void)__opencl_atomic_load(Ap, memory_order_relaxed, scope);

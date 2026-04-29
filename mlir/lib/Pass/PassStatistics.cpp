@@ -27,7 +27,7 @@ struct Statistic {
 
 /// Utility to print a pass entry in the statistics output.
 static void printPassEntry(raw_ostream &os, unsigned indent, StringRef pass,
-                           MutableArrayRef<Statistic> stats = std::nullopt) {
+                           MutableArrayRef<Statistic> stats = {}) {
   os.indent(indent) << pass << "\n";
   if (stats.empty())
     return;
@@ -73,8 +73,8 @@ static void printResultsAsList(raw_ostream &os, OpPassManager &pm) {
         for (Pass::Statistic *it : pass->getStatistics())
           passEntry.push_back({it->getName(), it->getDesc(), it->getValue()});
       } else {
-        for (auto &it : llvm::enumerate(pass->getStatistics()))
-          passEntry[it.index()].value += it.value()->getValue();
+        for (auto [idx, statistic] : llvm::enumerate(pass->getStatistics()))
+          passEntry[idx].value += statistic->getValue();
       }
 #endif
       return;

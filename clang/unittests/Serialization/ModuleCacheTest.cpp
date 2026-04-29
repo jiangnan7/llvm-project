@@ -14,6 +14,7 @@
 #include "clang/Lex/HeaderSearch.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "gtest/gtest.h"
@@ -87,6 +88,17 @@ public:
         }
     )cpp");
   }
+
+  std::unique_ptr<CompilerInvocation>
+  createInvocationAndEnableFree(ArrayRef<const char *> Args,
+                                CreateInvocationOptions Opts) {
+    std::unique_ptr<CompilerInvocation> Invocation =
+        createInvocation(Args, Opts);
+    if (Invocation)
+      Invocation->getFrontendOpts().DisableFree = false;
+
+    return Invocation;
+  }
 };
 
 TEST_F(ModuleCacheTest, CachedModuleNewPath) {
@@ -94,9 +106,11 @@ TEST_F(ModuleCacheTest, CachedModuleNewPath) {
 
   SmallString<256> MCPArg("-fmodules-cache-path=");
   MCPArg.append(ModuleCachePath);
-  IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
-      CompilerInstance::createDiagnostics(new DiagnosticOptions());
   CreateInvocationOptions CIOpts;
+  CIOpts.VFS = llvm::vfs::createPhysicalFileSystem();
+  DiagnosticOptions DiagOpts;
+  IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
+      CompilerInstance::createDiagnostics(*CIOpts.VFS, DiagOpts);
   CIOpts.Diags = Diags;
 
   // First run should pass with no errors
@@ -104,11 +118,10 @@ TEST_F(ModuleCacheTest, CachedModuleNewPath) {
                         MCPArg.c_str(), "-working-directory", TestDir.c_str(),
                         "test.m"};
   std::shared_ptr<CompilerInvocation> Invocation =
-      createInvocation(Args, CIOpts);
+      createInvocationAndEnableFree(Args, CIOpts);
   ASSERT_TRUE(Invocation);
-  CompilerInstance Instance;
+  CompilerInstance Instance(std::move(Invocation));
   Instance.setDiagnostics(Diags.get());
-  Instance.setInvocation(Invocation);
   SyntaxOnlyAction Action;
   ASSERT_TRUE(Instance.ExecuteAction(Action));
   ASSERT_FALSE(Diags->hasErrorOccurred());
@@ -127,12 +140,12 @@ TEST_F(ModuleCacheTest, CachedModuleNewPath) {
                          "-Fframeworks",  MCPArg.c_str(), "-working-directory",
                          TestDir.c_str(), "test.m"};
   std::shared_ptr<CompilerInvocation> Invocation2 =
-      createInvocation(Args2, CIOpts);
+      createInvocationAndEnableFree(Args2, CIOpts);
   ASSERT_TRUE(Invocation2);
-  CompilerInstance Instance2(Instance.getPCHContainerOperations(),
+  CompilerInstance Instance2(std::move(Invocation2),
+                             Instance.getPCHContainerOperations(),
                              &Instance.getModuleCache());
   Instance2.setDiagnostics(Diags.get());
-  Instance2.setInvocation(Invocation2);
   SyntaxOnlyAction Action2;
   ASSERT_FALSE(Instance2.ExecuteAction(Action2));
   ASSERT_TRUE(Diags->hasErrorOccurred());
@@ -143,9 +156,11 @@ TEST_F(ModuleCacheTest, CachedModuleNewPathAllowErrors) {
 
   SmallString<256> MCPArg("-fmodules-cache-path=");
   MCPArg.append(ModuleCachePath);
-  IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
-      CompilerInstance::createDiagnostics(new DiagnosticOptions());
   CreateInvocationOptions CIOpts;
+  CIOpts.VFS = llvm::vfs::createPhysicalFileSystem();
+  DiagnosticOptions DiagOpts;
+  IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
+      CompilerInstance::createDiagnostics(*CIOpts.VFS, DiagOpts);
   CIOpts.Diags = Diags;
 
   // First run should pass with no errors
@@ -153,11 +168,10 @@ TEST_F(ModuleCacheTest, CachedModuleNewPathAllowErrors) {
                         MCPArg.c_str(), "-working-directory", TestDir.c_str(),
                         "test.m"};
   std::shared_ptr<CompilerInvocation> Invocation =
-      createInvocation(Args, CIOpts);
+      createInvocationAndEnableFree(Args, CIOpts);
   ASSERT_TRUE(Invocation);
-  CompilerInstance Instance;
+  CompilerInstance Instance(std::move(Invocation));
   Instance.setDiagnostics(Diags.get());
-  Instance.setInvocation(Invocation);
   SyntaxOnlyAction Action;
   ASSERT_TRUE(Instance.ExecuteAction(Action));
   ASSERT_FALSE(Diags->hasErrorOccurred());
@@ -170,12 +184,12 @@ TEST_F(ModuleCacheTest, CachedModuleNewPathAllowErrors) {
       TestDir.c_str(), "-Xclang",      "-fallow-pcm-with-compiler-errors",
       "test.m"};
   std::shared_ptr<CompilerInvocation> Invocation2 =
-      createInvocation(Args2, CIOpts);
+      createInvocationAndEnableFree(Args2, CIOpts);
   ASSERT_TRUE(Invocation2);
-  CompilerInstance Instance2(Instance.getPCHContainerOperations(),
+  CompilerInstance Instance2(std::move(Invocation2),
+                             Instance.getPCHContainerOperations(),
                              &Instance.getModuleCache());
   Instance2.setDiagnostics(Diags.get());
-  Instance2.setInvocation(Invocation2);
   SyntaxOnlyAction Action2;
   ASSERT_FALSE(Instance2.ExecuteAction(Action2));
   ASSERT_TRUE(Diags->hasErrorOccurred());

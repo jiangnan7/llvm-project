@@ -13,30 +13,35 @@ add_public_tablegen_target(NVPTXCommonTableGen)
 set(NVPTXCodeGen_sources
   NVPTXAliasAnalysis.cpp
   NVPTXAllocaHoisting.cpp
-  NVPTXAtomicLower.cpp
   NVPTXAsmPrinter.cpp
   NVPTXAssignValidGlobalNames.cpp
+  NVPTXAtomicLower.cpp
+  NVPTXCtorDtorLowering.cpp
+  NVPTXForwardParams.cpp
   NVPTXFrameLowering.cpp
   NVPTXGenericToNVVM.cpp
-  NVPTXISelDAGToDAG.cpp
-  NVPTXISelLowering.cpp
   NVPTXImageOptimizer.cpp
   NVPTXInstrInfo.cpp
+  NVPTXISelDAGToDAG.cpp
+  NVPTXISelLowering.cpp
   NVPTXLowerAggrCopies.cpp
-  NVPTXLowerArgs.cpp
   NVPTXLowerAlloca.cpp
-  NVPTXPeephole.cpp
+  NVPTXLowerArgs.cpp
+  NVPTXLowerUnreachable.cpp
   NVPTXMCExpr.cpp
+  NVPTXPeephole.cpp
   NVPTXPrologEpilogPass.cpp
+  NVPTXProxyRegErasure.cpp
   NVPTXRegisterInfo.cpp
   NVPTXReplaceImageHandles.cpp
+  NVPTXSelectionDAGInfo.cpp
   NVPTXSubtarget.cpp
+  NVPTXTagInvariantLoads.cpp
   NVPTXTargetMachine.cpp
   NVPTXTargetTransformInfo.cpp
   NVPTXUtilities.cpp
   NVVMIntrRange.cpp
   NVVMReflect.cpp
-  NVPTXProxyRegErasure.cpp
   )
 
 add_llvm_target(NVPTXCodeGen
@@ -46,6 +51,7 @@ add_llvm_target(NVPTXCodeGen
   Analysis
   AsmPrinter
   CodeGen
+  CodeGenTypes
   Core
   IPO
   MC
@@ -61,7 +67,7 @@ add_llvm_target(NVPTXCodeGen
 
   ADD_TO_COMPONENT
   NVPTX
-)
+  )
 
 add_subdirectory(MCTargetDesc)
 add_subdirectory(TargetInfo)

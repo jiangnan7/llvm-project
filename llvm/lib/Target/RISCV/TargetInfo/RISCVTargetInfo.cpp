@@ -1,4 +1,4 @@
-//===-- RISCVTargetInfo.cpp - RISCV Target Implementation -----------------===//
+//===-- RISCVTargetInfo.cpp - RISC-V Target Implementation ----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,6 +8,7 @@
 
 #include "TargetInfo/RISCVTargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/Compiler.h"
 using namespace llvm;
 
 Target &llvm::getTheRISCV32Target() {
@@ -20,7 +21,8 @@ Target &llvm::getTheRISCV64Target() {
   return TheRISCV64Target;
 }
 
-extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTargetInfo() {
+extern "C" LLVM_ABI LLVM_EXTERNAL_VISIBILITY void
+LLVMInitializeRISCVTargetInfo() {
   RegisterTarget<Triple::riscv32, /*HasJIT=*/true> X(
       getTheRISCV32Target(), "riscv32", "32-bit RISC-V", "RISCV");
   RegisterTarget<Triple::riscv64, /*HasJIT=*/true> Y(

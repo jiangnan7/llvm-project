@@ -33,6 +33,8 @@ findCallsAtConstantOffset(SmallVectorImpl<DevirtCallSite> &DevirtCalls,
     // after indirect call promotion and inlining, where we may have uses
     // of the vtable pointer guarded by a function pointer check, and a fallback
     // indirect call.
+    if (CI->getFunction() != User->getFunction())
+      continue;
     if (!DT.dominates(CI, User))
       continue;
     if (isa<BitCastInst>(User)) {
@@ -52,6 +54,9 @@ findCallsAtConstantOffset(SmallVectorImpl<DevirtCallSite> &DevirtCalls,
 static void findLoadCallsAtConstantOffset(
     const Module *M, SmallVectorImpl<DevirtCallSite> &DevirtCalls, Value *VPtr,
     int64_t Offset, const CallInst *CI, DominatorTree &DT) {
+  if (!VPtr->hasUseList())
+    return;
+
   for (const Use &U : VPtr->uses()) {
     Value *User = U.getUser();
     if (isa<BitCastInst>(User)) {
@@ -107,7 +112,9 @@ void llvm::findDevirtualizableCallsForTypeCheckedLoad(
     SmallVectorImpl<Instruction *> &Preds, bool &HasNonCallUses,
     const CallInst *CI, DominatorTree &DT) {
   assert(CI->getCalledFunction()->getIntrinsicID() ==
-         Intrinsic::type_checked_load);
+             Intrinsic::type_checked_load ||
+         CI->getCalledFunction()->getIntrinsicID() ==
+             Intrinsic::type_checked_load_relative);
 
   auto *Offset = dyn_cast<ConstantInt>(CI->getArgOperand(1));
   if (!Offset) {
@@ -175,7 +182,7 @@ Constant *llvm::getPointerAtOffset(Constant *I, uint64_t Offset, Module &M,
 
   // Relative-pointer support starts here.
   if (auto *CI = dyn_cast<ConstantInt>(I)) {
-    if (Offset == 0 && CI->getZExtValue() == 0) {
+    if (Offset == 0 && CI->isZero()) {
       return I;
     }
   }
@@ -211,6 +218,26 @@ Constant *llvm::getPointerAtOffset(Constant *I, uint64_t Offset, Module &M,
     }
   }
   return nullptr;
+}
+
+std::pair<Function *, Constant *>
+llvm::getFunctionAtVTableOffset(GlobalVariable *GV, uint64_t Offset,
+                                Module &M) {
+  Constant *Ptr = getPointerAtOffset(GV->getInitializer(), Offset, M, GV);
+  if (!Ptr)
+    return std::pair<Function *, Constant *>(nullptr, nullptr);
+
+  auto C = Ptr->stripPointerCasts();
+  // Make sure this is a function or alias to a function.
+  auto Fn = dyn_cast<Function>(C);
+  auto A = dyn_cast<GlobalAlias>(C);
+  if (!Fn && A)
+    Fn = dyn_cast<Function>(A->getAliasee());
+
+  if (!Fn)
+    return std::pair<Function *, Constant *>(nullptr, nullptr);
+
+  return std::pair<Function *, Constant *>(Fn, C);
 }
 
 static void replaceRelativePointerUserWithZero(User *U) {

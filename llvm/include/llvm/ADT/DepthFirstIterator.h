@@ -39,6 +39,7 @@
 #include "llvm/ADT/iterator_range.h"
 #include <iterator>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -84,11 +85,14 @@ template <class GraphT,
           bool ExtStorage = false, class GT = GraphTraits<GraphT>>
 class df_iterator : public df_iterator_storage<SetType, ExtStorage> {
 public:
-  using iterator_category = std::forward_iterator_tag;
+  // When External storage is used we are not multi-pass safe.
+  using iterator_category =
+      std::conditional_t<ExtStorage, std::input_iterator_tag,
+                         std::forward_iterator_tag>;
   using value_type = typename GT::NodeRef;
   using difference_type = std::ptrdiff_t;
   using pointer = value_type *;
-  using reference = value_type &;
+  using reference = const value_type &;
 
 private:
   using NodeRef = typename GT::NodeRef;
@@ -165,7 +169,7 @@ public:
   }
   bool operator!=(const df_iterator &x) const { return !(*this == x); }
 
-  const NodeRef &operator*() const { return VisitStack.back().first; }
+  reference operator*() const { return VisitStack.back().first; }
 
   // This is a nonstandard operator-> that dereferences the pointer an extra
   // time... so that you can actually call methods ON the Node, because

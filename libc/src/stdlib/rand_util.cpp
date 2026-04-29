@@ -7,9 +7,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/stdlib/rand_util.h"
+#include "src/__support/CPP/atomic.h"
+#include "src/__support/macros/attributes.h"
+#include "src/__support/macros/config.h"
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE_DECL {
 
-thread_local unsigned long rand_next;
+// C standard 7.10p2: If 'rand' is called before 'srand' it is to
+// proceed as if the 'srand' function was called with a value of '1'.
+cpp::Atomic<unsigned long> rand_next = 1;
 
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE_DECL

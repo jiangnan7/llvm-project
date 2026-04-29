@@ -31,6 +31,9 @@
 #  pragma GCC system_header
 #endif
 
+_LIBCPP_PUSH_MACROS
+#include <__undef_macros>
+
 #if _LIBCPP_STD_VER >= 23
 
 _LIBCPP_BEGIN_NAMESPACE_STD
@@ -45,12 +48,12 @@ template <class _Err>
 struct __is_std_unexpected<unexpected<_Err>> : true_type {};
 
 template <class _Tp>
-using __valid_std_unexpected = _BoolConstant< //
-    is_object_v<_Tp> &&                       //
-    !is_array_v<_Tp> &&                       //
-    !__is_std_unexpected<_Tp>::value &&       //
-    !is_const_v<_Tp> &&                       //
-    !is_volatile_v<_Tp>                       //
+using __valid_std_unexpected _LIBCPP_NODEBUG = _BoolConstant< //
+    is_object_v<_Tp> &&                                       //
+    !is_array_v<_Tp> &&                                       //
+    !__is_std_unexpected<_Tp>::value &&                       //
+    !is_const_v<_Tp> &&                                       //
+    !is_volatile_v<_Tp>                                       //
     >;
 
 template <class _Err>
@@ -64,8 +67,8 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr unexpected(unexpected&&)      = default;
 
   template <class _Error = _Err>
-    requires(!is_same_v<remove_cvref_t<_Error>, unexpected> &&          //
-             !is_same_v<remove_cvref_t<_Error>, in_place_t> &&          //
+    requires(!is_same_v<remove_cvref_t<_Error>, unexpected> && //
+             !is_same_v<remove_cvref_t<_Error>, in_place_t> && //
              is_constructible_v<_Err, _Error>)
   _LIBCPP_HIDE_FROM_ABI constexpr explicit unexpected(_Error&& __error) //
       noexcept(is_nothrow_constructible_v<_Err, _Error>)                // strengthened
@@ -105,7 +108,7 @@ public:
 
   template <class _Err2>
   _LIBCPP_HIDE_FROM_ABI friend constexpr bool operator==(const unexpected& __x, const unexpected<_Err2>& __y) {
-    return __x.__unex_ == __y.__unex_;
+    return __x.__unex_ == __y.error();
   }
 
 private:
@@ -118,5 +121,7 @@ unexpected(_Err) -> unexpected<_Err>;
 _LIBCPP_END_NAMESPACE_STD
 
 #endif // _LIBCPP_STD_VER >= 23
+
+_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___EXPECTED_UNEXPECTED_H

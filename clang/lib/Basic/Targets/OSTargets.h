@@ -34,46 +34,39 @@ public:
   }
 };
 
-// CloudABI Target
-template <typename Target>
-class LLVM_LIBRARY_VISIBILITY CloudABITargetInfo : public OSTargetInfo<Target> {
-protected:
-  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const override {
-    Builder.defineMacro("__CloudABI__");
-    Builder.defineMacro("__ELF__");
-
-    // CloudABI uses ISO/IEC 10646:2012 for wchar_t, char16_t and char32_t.
-    Builder.defineMacro("__STDC_ISO_10646__", "201206L");
-    Builder.defineMacro("__STDC_UTF_16__");
-    Builder.defineMacro("__STDC_UTF_32__");
-  }
-
-public:
-  using OSTargetInfo<Target>::OSTargetInfo;
-};
-
-// Ananas target
-template <typename Target>
-class LLVM_LIBRARY_VISIBILITY AnanasTargetInfo : public OSTargetInfo<Target> {
-protected:
-  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const override {
-    // Ananas defines
-    Builder.defineMacro("__Ananas__");
-    Builder.defineMacro("__ELF__");
-  }
-
-public:
-  using OSTargetInfo<Target>::OSTargetInfo;
-};
+void getAppleMachODefines(MacroBuilder &Builder, const LangOptions &Opts,
+                          const llvm::Triple &Triple);
 
 void getDarwinDefines(MacroBuilder &Builder, const LangOptions &Opts,
                       const llvm::Triple &Triple, StringRef &PlatformName,
                       VersionTuple &PlatformMinVersion);
 
 template <typename Target>
-class LLVM_LIBRARY_VISIBILITY DarwinTargetInfo : public OSTargetInfo<Target> {
+class LLVM_LIBRARY_VISIBILITY AppleMachOTargetInfo
+    : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    getAppleMachODefines(Builder, Opts, Triple);
+  }
+
+public:
+  AppleMachOTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {}
+
+  const char *getStaticInitSectionSpecifier() const override {
+    return "__TEXT,__StaticInit,regular,pure_instructions";
+  }
+
+  /// Apple Mach-O does not support protected visibility.  Its "default" is very
+  /// similar to ELF's "protected";  Apple Mach-O requires a "weak" attribute on
+  /// declarations that can be dynamically replaced.
+  bool hasProtectedVisibility() const override { return false; }
+};
+
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY DarwinTargetInfo
+    : public AppleMachOTargetInfo<Target> {
 protected:
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
                     MacroBuilder &Builder) const override {
@@ -83,7 +76,7 @@ protected:
 
 public:
   DarwinTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
-      : OSTargetInfo<Target>(Triple, Opts) {
+      : AppleMachOTargetInfo<Target>(Triple, Opts) {
     // By default, no TLS, and we list permitted architecture/OS
     // combinations.
     this->TLSSupported = false;
@@ -108,20 +101,16 @@ public:
         this->TLSSupported = !Triple.isOSVersionLT(3);
     } else if (Triple.isDriverKit()) {
       // No TLS on DriverKit.
-    }
+    } else if (Triple.isXROS())
+      this->TLSSupported = true;
 
     this->MCountName = "\01mcount";
   }
 
   const char *getStaticInitSectionSpecifier() const override {
     // FIXME: We should return 0 when building kexts.
-    return "__TEXT,__StaticInit,regular,pure_instructions";
+    return AppleMachOTargetInfo<Target>::getStaticInitSectionSpecifier();
   }
-
-  /// Darwin does not support protected visibility.  Darwin's "default"
-  /// is very similar to ELF's "protected";  Darwin requires a "weak"
-  /// attribute on declarations that can be dynamically replaced.
-  bool hasProtectedVisibility() const override { return false; }
 
   unsigned getExnObjectAlignment() const override {
     // Older versions of libc++abi guarantee an alignment of only 8-bytes for
@@ -142,6 +131,9 @@ public:
       break;
     case llvm::Triple::WatchOS: // Earliest supporting version is 5.0.0.
       MinVersion = llvm::VersionTuple(5U);
+      break;
+    case llvm::Triple::XROS:
+      MinVersion = llvm::VersionTuple(0);
       break;
     default:
       // Conservatively return 8 bytes if OS is unknown.
@@ -177,12 +169,14 @@ protected:
     // DragonFly defines; list based off of gcc output
     Builder.defineMacro("__DragonFly__");
     Builder.defineMacro("__DragonFly_cc_version", "100001");
-    Builder.defineMacro("__ELF__");
     Builder.defineMacro("__KPRINTF_ATTRIBUTE__");
     Builder.defineMacro("__tune_i386__");
     DefineStd(Builder, "unix", Opts);
     if (this->HasFloat128)
       Builder.defineMacro("__FLOAT128__");
+
+    if (Opts.C11)
+      Builder.defineMacro("__STDC_NO_THREADS__");
   }
 
 public:
@@ -222,7 +216,8 @@ protected:
     Builder.defineMacro("__FreeBSD_cc_version", Twine(CCVersion));
     Builder.defineMacro("__KPRINTF_ATTRIBUTE__");
     DefineStd(Builder, "unix", Opts);
-    Builder.defineMacro("__ELF__");
+    if (this->HasFloat128)
+      Builder.defineMacro("__FLOAT128__");
 
     // On FreeBSD, wchar_t contains the number of the code point as
     // used by the character set of the locale. These character sets are
@@ -240,9 +235,11 @@ public:
   FreeBSDTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
     switch (Triple.getArch()) {
-    default:
     case llvm::Triple::x86:
     case llvm::Triple::x86_64:
+      this->HasFloat128 = true;
+      [[fallthrough]];
+    default:
       this->MCountName = ".mcount";
       break;
     case llvm::Triple::mips:
@@ -256,7 +253,7 @@ public:
     case llvm::Triple::arm:
       this->MCountName = "__mcount";
       break;
-    case llvm::Triple::riscv32:
+    case llvm::Triple::loongarch64:
     case llvm::Triple::riscv64:
       break;
     }
@@ -274,7 +271,6 @@ protected:
     DefineStd(Builder, "unix", Opts);
     Builder.defineMacro("__FreeBSD_kernel__");
     Builder.defineMacro("__GLIBC__");
-    Builder.defineMacro("__ELF__");
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
     if (Opts.CPlusPlus)
@@ -293,7 +289,6 @@ protected:
                     MacroBuilder &Builder) const override {
     // Haiku defines; list based off of gcc output
     Builder.defineMacro("__HAIKU__");
-    Builder.defineMacro("__ELF__");
     DefineStd(Builder, "unix", Opts);
     if (this->HasFloat128)
       Builder.defineMacro("__FLOAT128__");
@@ -306,7 +301,6 @@ public:
     this->IntPtrType = TargetInfo::SignedLong;
     this->PtrDiffType = TargetInfo::SignedLong;
     this->ProcessIDType = TargetInfo::SignedLong;
-    this->TLSSupported = false;
     switch (Triple.getArch()) {
     default:
       break;
@@ -330,35 +324,11 @@ protected:
     Builder.defineMacro("__gnu_hurd__");
     Builder.defineMacro("__MACH__");
     Builder.defineMacro("__GLIBC__");
-    Builder.defineMacro("__ELF__");
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
     if (Opts.CPlusPlus)
       Builder.defineMacro("_GNU_SOURCE");
   }
-public:
-  using OSTargetInfo<Target>::OSTargetInfo;
-};
-
-// Minix Target
-template <typename Target>
-class LLVM_LIBRARY_VISIBILITY MinixTargetInfo : public OSTargetInfo<Target> {
-protected:
-  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const override {
-    // Minix defines
-
-    Builder.defineMacro("__minix", "3");
-    Builder.defineMacro("_EM_WSIZE", "4");
-    Builder.defineMacro("_EM_PSIZE", "4");
-    Builder.defineMacro("_EM_SSIZE", "2");
-    Builder.defineMacro("_EM_LSIZE", "4");
-    Builder.defineMacro("_EM_FSIZE", "4");
-    Builder.defineMacro("_EM_DSIZE", "8");
-    Builder.defineMacro("__ELF__");
-    DefineStd(Builder, "unix", Opts);
-  }
-
 public:
   using OSTargetInfo<Target>::OSTargetInfo;
 };
@@ -372,7 +342,6 @@ protected:
     // Linux defines; list based off of gcc output
     DefineStd(Builder, "unix", Opts);
     DefineStd(Builder, "linux", Opts);
-    Builder.defineMacro("__ELF__");
     if (Triple.isAndroid()) {
       Builder.defineMacro("__ANDROID__", "1");
       this->PlatformName = "android";
@@ -393,6 +362,10 @@ protected:
       Builder.defineMacro("_GNU_SOURCE");
     if (this->HasFloat128)
       Builder.defineMacro("__FLOAT128__");
+    if (Triple.isTime64ABI()) {
+      Builder.defineMacro("_FILE_OFFSET_BITS", "64");
+      Builder.defineMacro("_TIME_BITS", "64");
+    }
   }
 
 public:
@@ -425,6 +398,36 @@ public:
   }
 };
 
+// Managarm Target
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY ManagarmTargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    DefineStd(Builder, "unix", Opts);
+    Builder.defineMacro("__managarm__");
+    if (Opts.POSIXThreads)
+      Builder.defineMacro("_REENTRANT");
+    if (Opts.CPlusPlus)
+      Builder.defineMacro("_GNU_SOURCE");
+    if (this->HasFloat128)
+      Builder.defineMacro("__FLOAT128__");
+  }
+
+public:
+  ManagarmTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {
+    switch (Triple.getArch()) {
+    default:
+      break;
+    case llvm::Triple::x86:
+    case llvm::Triple::x86_64:
+      this->HasFloat128 = true;
+      break;
+    }
+  }
+};
+
 // NetBSD Target
 template <typename Target>
 class LLVM_LIBRARY_VISIBILITY NetBSDTargetInfo : public OSTargetInfo<Target> {
@@ -434,15 +437,24 @@ protected:
     // NetBSD defines; list based off of gcc output
     Builder.defineMacro("__NetBSD__");
     Builder.defineMacro("__unix__");
-    Builder.defineMacro("__ELF__");
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
+    if (this->HasFloat128)
+      Builder.defineMacro("__FLOAT128__");
   }
 
 public:
   NetBSDTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
     this->MCountName = "__mcount";
+    switch (Triple.getArch()) {
+    default:
+      break;
+    case llvm::Triple::x86:
+    case llvm::Triple::x86_64:
+      this->HasFloat128 = true;
+      break;
+    }
   }
 };
 
@@ -456,7 +468,6 @@ protected:
 
     Builder.defineMacro("__OpenBSD__");
     DefineStd(Builder, "unix", Opts);
-    Builder.defineMacro("__ELF__");
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
     if (this->HasFloat128)
@@ -488,7 +499,7 @@ public:
     case llvm::Triple::sparcv9:
       this->MCountName = "_mcount";
       break;
-    case llvm::Triple::riscv32:
+    case llvm::Triple::loongarch64:
     case llvm::Triple::riscv64:
       break;
     }
@@ -502,10 +513,8 @@ protected:
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
                     MacroBuilder &Builder) const override {
     // PS3 PPU defines.
-    Builder.defineMacro("__PPC__");
     Builder.defineMacro("__PPU__");
     Builder.defineMacro("__CELLOS_LV2__");
-    Builder.defineMacro("__ELF__");
     Builder.defineMacro("__LP32__");
     Builder.defineMacro("_ARCH_PPC64");
     Builder.defineMacro("__powerpc64__");
@@ -519,7 +528,7 @@ public:
     this->IntMaxType = TargetInfo::SignedLongLong;
     this->Int64Type = TargetInfo::SignedLongLong;
     this->SizeType = TargetInfo::UnsignedInt;
-    this->resetDataLayout("E-m:e-p:32:32-i64:64-n32:64");
+    this->resetDataLayout("E-m:e-p:32:32-Fi64-i64:64-i128:128-n32:64");
   }
 };
 
@@ -533,7 +542,6 @@ protected:
     Builder.defineMacro("__FreeBSD_cc_version", "900001");
     Builder.defineMacro("__KPRINTF_ATTRIBUTE__");
     DefineStd(Builder, "unix", Opts);
-    Builder.defineMacro("__ELF__");
     Builder.defineMacro("__SCE__");
     Builder.defineMacro("__STDC_NO_COMPLEX__");
     Builder.defineMacro("__STDC_NO_THREADS__");
@@ -608,7 +616,6 @@ protected:
     // RTEMS defines; list based off of gcc output
 
     Builder.defineMacro("__rtems__");
-    Builder.defineMacro("__ELF__");
     if (Opts.CPlusPlus)
       Builder.defineMacro("_GNU_SOURCE");
   }
@@ -643,17 +650,9 @@ protected:
                     MacroBuilder &Builder) const override {
     DefineStd(Builder, "sun", Opts);
     DefineStd(Builder, "unix", Opts);
-    Builder.defineMacro("__ELF__");
     Builder.defineMacro("__svr4__");
     Builder.defineMacro("__SVR4");
-    // Solaris headers require _XOPEN_SOURCE to be set to 600 for C99 and
-    // newer, but to 500 for everything else.  feature_test.h has a check to
-    // ensure that you are not using C99 with an old version of X/Open or C89
-    // with a new version.
-    if (Opts.C99)
-      Builder.defineMacro("_XOPEN_SOURCE", "600");
-    else
-      Builder.defineMacro("_XOPEN_SOURCE", "500");
+    Builder.defineMacro("_XOPEN_SOURCE", "600");
     if (Opts.CPlusPlus) {
       Builder.defineMacro("__C99FEATURES__");
       Builder.defineMacro("_FILE_OFFSET_BITS", "64");
@@ -789,13 +788,11 @@ protected:
                     MacroBuilder &Builder) const override {
     // FIXME: _LONG_LONG should not be defined under -std=c89.
     Builder.defineMacro("_LONG_LONG");
-    Builder.defineMacro("_OPEN_DEFAULT");
-    // _UNIX03_WITHDRAWN is required to build libcxx.
-    Builder.defineMacro("_UNIX03_WITHDRAWN");
     Builder.defineMacro("__370__");
     Builder.defineMacro("__BFP__");
     // FIXME: __BOOL__ should not be defined under -std=c89.
     Builder.defineMacro("__BOOL__");
+    Builder.defineMacro("__COMPILER_VER__", "0x50000000");
     Builder.defineMacro("__LONGNAME__");
     Builder.defineMacro("__MVS__");
     Builder.defineMacro("__THW_370__");
@@ -806,17 +803,6 @@ protected:
 
     if (this->PointerWidth == 64)
       Builder.defineMacro("__64BIT__");
-
-    if (Opts.CPlusPlus) {
-      Builder.defineMacro("__DLL__");
-      // _XOPEN_SOURCE=600 is required to build libcxx.
-      Builder.defineMacro("_XOPEN_SOURCE", "600");
-    }
-
-    if (Opts.GNUMode) {
-      Builder.defineMacro("_MI_BUILTIN");
-      Builder.defineMacro("_EXT");
-    }
 
     if (Opts.CPlusPlus && Opts.WChar) {
       // Macro __wchar_t is defined so that the wchar_t data
@@ -836,10 +822,29 @@ public:
     this->UseZeroLengthBitfieldAlignment = true;
     this->UseLeadingZeroLengthBitfield = false;
     this->ZeroLengthBitfieldBoundary = 32;
+    this->TheCXXABI.set(TargetCXXABI::XL);
   }
 
   bool areDefaultedSMFStillPOD(const LangOptions &) const override {
     return false;
+  }
+};
+
+// UEFI target
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY UEFITargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    Builder.defineMacro("__UEFI__");
+  }
+
+public:
+  UEFITargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {
+    this->WCharType = TargetInfo::UnsignedShort;
+    this->WIntType = TargetInfo::UnsignedShort;
+    this->UseMicrosoftManglingForC = true;
   }
 };
 
@@ -860,6 +865,7 @@ public:
       : OSTargetInfo<Target>(Triple, Opts) {
     this->WCharType = TargetInfo::UnsignedShort;
     this->WIntType = TargetInfo::UnsignedShort;
+    this->UseMicrosoftManglingForC = true;
   }
 };
 
@@ -874,7 +880,6 @@ protected:
       Builder.defineMacro("_GNU_SOURCE");
 
     DefineStd(Builder, "unix", Opts);
-    Builder.defineMacro("__ELF__");
     Builder.defineMacro("__native_client__");
   }
 
@@ -901,15 +906,12 @@ public:
       // Handled in ARM's setABI().
     } else if (Triple.getArch() == llvm::Triple::x86) {
       this->resetDataLayout("e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-"
-                            "i64:64-n8:16:32-S128");
+                            "i64:64-i128:128-n8:16:32-S128");
     } else if (Triple.getArch() == llvm::Triple::x86_64) {
       this->resetDataLayout("e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-"
-                            "i64:64-n8:16:32:64-S128");
+                            "i64:64-i128:128-n8:16:32:64-S128");
     } else if (Triple.getArch() == llvm::Triple::mipsel) {
       // Handled on mips' setDataLayout.
-    } else {
-      assert(Triple.getArch() == llvm::Triple::le32);
-      this->resetDataLayout("e-p:32:32-i64:64");
     }
   }
 };
@@ -921,7 +923,6 @@ protected:
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
                     MacroBuilder &Builder) const override {
     Builder.defineMacro("__Fuchsia__");
-    Builder.defineMacro("__ELF__");
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");
     // Required by the libc++ locale support.
@@ -935,6 +936,7 @@ protected:
 public:
   FuchsiaTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
+    this->WIntType = TargetInfo::UnsignedInt;
     this->MCountName = "__mcount";
     this->TheCXXABI.set(TargetCXXABI::Fuchsia);
   }
@@ -1004,6 +1006,7 @@ public:
     // Emscripten's ABI is unstable and we may change this back to 128 to match
     // the WebAssembly default in the future.
     this->LongDoubleAlign = 64;
+    this->Float128Align = 64;
   }
 };
 
@@ -1015,8 +1018,6 @@ protected:
                     MacroBuilder &Builder) const override {
     // Linux defines; list based off of gcc output
     DefineStd(Builder, "unix", Opts);
-
-    Builder.defineMacro("__ELF__");
 
     // Generic OHOS target defines
     if (Triple.isOHOSFamily()) {

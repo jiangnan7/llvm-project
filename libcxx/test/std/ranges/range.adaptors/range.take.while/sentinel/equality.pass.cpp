@@ -26,7 +26,7 @@ struct Iter {
   int* it_;
 
   using value_type       = int;
-  using difference_type  = intptr_t;
+  using difference_type  = std::intptr_t;
   using iterator_concept = std::input_iterator_tag;
 
   constexpr decltype(auto) operator*() const { return *it_; }
@@ -70,37 +70,33 @@ struct LessThan3 {
   constexpr bool operator()(int i) const { return i < 3; }
 };
 
-// Test Constraint
-template <class I, class S>
-concept HasEqual = requires(const I i, const S s) { i == s; };
-
 using std::ranges::iterator_t;
 using std::ranges::sentinel_t;
 using std::ranges::take_while_view;
 
-static_assert(HasEqual<iterator_t<take_while_view<R, LessThan3>>, //
-                       sentinel_t<take_while_view<R, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<take_while_view<R, LessThan3>>, //
+                                              sentinel_t<take_while_view<R, LessThan3>>>);
 
-static_assert(!HasEqual<iterator_t<const take_while_view<R, LessThan3>>, //
-                        sentinel_t<take_while_view<R, LessThan3>>>);
+static_assert(!weakly_equality_comparable_with<iterator_t<const take_while_view<R, LessThan3>>, //
+                                               sentinel_t<take_while_view<R, LessThan3>>>);
 
-static_assert(!HasEqual<iterator_t<take_while_view<R, LessThan3>>, //
-                        sentinel_t<const take_while_view<R, LessThan3>>>);
+static_assert(!weakly_equality_comparable_with<iterator_t<take_while_view<R, LessThan3>>, //
+                                               sentinel_t<const take_while_view<R, LessThan3>>>);
 
-static_assert(HasEqual<iterator_t<const take_while_view<R, LessThan3>>, //
-                       sentinel_t<const take_while_view<R, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<const take_while_view<R, LessThan3>>, //
+                                              sentinel_t<const take_while_view<R, LessThan3>>>);
 
-static_assert(HasEqual<iterator_t<take_while_view<R, LessThan3>>, //
-                       sentinel_t<take_while_view<R, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<take_while_view<CrossComparableR, LessThan3>>, //
+                                              sentinel_t<take_while_view<CrossComparableR, LessThan3>>>);
 
-static_assert(HasEqual<iterator_t<const take_while_view<CrossComparableR, LessThan3>>, //
-                       sentinel_t<take_while_view<CrossComparableR, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<const take_while_view<CrossComparableR, LessThan3>>, //
+                                              sentinel_t<take_while_view<CrossComparableR, LessThan3>>>);
 
-static_assert(HasEqual<iterator_t<take_while_view<CrossComparableR, LessThan3>>, //
-                       sentinel_t<const take_while_view<CrossComparableR, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<take_while_view<CrossComparableR, LessThan3>>, //
+                                              sentinel_t<const take_while_view<CrossComparableR, LessThan3>>>);
 
-static_assert(HasEqual<iterator_t<const take_while_view<CrossComparableR, LessThan3>>, //
-                       sentinel_t<const take_while_view<CrossComparableR, LessThan3>>>);
+static_assert(weakly_equality_comparable_with<iterator_t<const take_while_view<CrossComparableR, LessThan3>>, //
+                                              sentinel_t<const take_while_view<CrossComparableR, LessThan3>>>);
 
 template <class R, bool ConstIter, bool ConstSent>
 constexpr void testOne() {

@@ -14,6 +14,7 @@
 #ifndef LLVM_SUPPORT_CACHEPRUNING_H
 #define LLVM_SUPPORT_CACHEPRUNING_H
 
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <chrono>
 #include <optional>
@@ -28,8 +29,8 @@ class StringRef;
 struct CachePruningPolicy {
   /// The pruning interval. This is intended to be used to avoid scanning the
   /// directory too often. It does not impact the decision of which file to
-  /// prune. A value of 0 forces the scan to occur. A value of None disables
-  /// pruning.
+  /// prune. A value of 0 forces the scan to occur. A value of std::nullopt
+  /// disables pruning.
   std::optional<std::chrono::seconds> Interval = std::chrono::seconds(1200);
 
   /// The expiration for a file. When a file hasn't been accessed for Expiration
@@ -66,7 +67,8 @@ struct CachePruningPolicy {
 /// For example: "prune_interval=30s:prune_after=24h:cache_size=50%"
 /// which means a pruning interval of 30 seconds, expiration time of 24 hours
 /// and maximum cache size of 50% of available disk space.
-Expected<CachePruningPolicy> parseCachePruningPolicy(StringRef PolicyStr);
+LLVM_ABI Expected<CachePruningPolicy>
+parseCachePruningPolicy(StringRef PolicyStr);
 
 /// Peform pruning using the supplied policy, returns true if pruning
 /// occurred, i.e. if Policy.Interval was expired.
@@ -79,8 +81,9 @@ Expected<CachePruningPolicy> parseCachePruningPolicy(StringRef PolicyStr);
 /// As a safeguard against data loss if the user specifies the wrong directory
 /// as their cache directory, this function will ignore files not matching the
 /// pattern "llvmcache-*".
-bool pruneCache(StringRef Path, CachePruningPolicy Policy,
-                const std::vector<std::unique_ptr<MemoryBuffer>> &Files = {});
+LLVM_ABI bool
+pruneCache(StringRef Path, CachePruningPolicy Policy,
+           const std::vector<std::unique_ptr<MemoryBuffer>> &Files = {});
 } // namespace llvm
 
 #endif

@@ -26,7 +26,7 @@ getAllNamedFields(const CXXRecordDecl *Record) {
   std::set<const FieldDecl *> Result;
   for (const auto *Field : Record->fields()) {
     // Static data members are not in this range.
-    if (Field->isUnnamedBitfield())
+    if (Field->isUnnamedBitField())
       continue;
     Result.insert(Field);
   }
@@ -48,8 +48,8 @@ static std::set<const Type *> getAllDirectBases(const CXXRecordDecl *Record) {
 /// Returns a matcher that matches member expressions where the base is
 /// the variable declared as \p Var and the accessed member is the one declared
 /// as \p Field.
-internal::Matcher<Expr> accessToFieldInVar(const FieldDecl *Field,
-                                           const ValueDecl *Var) {
+static internal::Matcher<Expr> accessToFieldInVar(const FieldDecl *Field,
+                                                  const ValueDecl *Var) {
   return ignoringImpCasts(
       memberExpr(hasObjectExpression(declRefExpr(to(varDecl(equalsNode(Var))))),
                  member(fieldDecl(equalsNode(Field)))));
@@ -235,19 +235,19 @@ void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
 
   // Destructor.
   Finder->addMatcher(
-      cxxDestructorDecl(unless(hasParent(IsUnionLikeClass)), isDefinition())
+      cxxDestructorDecl(isDefinition(), unless(ofClass(IsUnionLikeClass)))
           .bind(SpecialFunction),
       this);
+  // Constructor.
   Finder->addMatcher(
       cxxConstructorDecl(
-          unless(
-              hasParent(decl(anyOf(IsUnionLikeClass, functionTemplateDecl())))),
-          isDefinition(),
+          isDefinition(), unless(ofClass(IsUnionLikeClass)),
+          unless(hasParent(functionTemplateDecl())),
           anyOf(
               // Default constructor.
-              allOf(unless(hasAnyConstructorInitializer(isWritten())),
-                    unless(isVariadic()), parameterCountIs(0),
-                    IsPublicOrOutOfLineUntilCPP20),
+              allOf(parameterCountIs(0),
+                    unless(hasAnyConstructorInitializer(isWritten())),
+                    unless(isVariadic()), IsPublicOrOutOfLineUntilCPP20),
               // Copy constructor.
               allOf(isCopyConstructor(),
                     // Discard constructors that can be used as a copy
@@ -258,9 +258,9 @@ void UseEqualsDefaultCheck::registerMatchers(MatchFinder *Finder) {
       this);
   // Copy-assignment operator.
   Finder->addMatcher(
-      cxxMethodDecl(unless(hasParent(
-                        decl(anyOf(IsUnionLikeClass, functionTemplateDecl())))),
-                    isDefinition(), isCopyAssignmentOperator(),
+      cxxMethodDecl(isDefinition(), isCopyAssignmentOperator(),
+                    unless(ofClass(IsUnionLikeClass)),
+                    unless(hasParent(functionTemplateDecl())),
                     // isCopyAssignmentOperator() allows the parameter to be
                     // passed by value, and in this case it cannot be
                     // defaulted.
@@ -299,12 +299,18 @@ void UseEqualsDefaultCheck::check(const MatchFinder::MatchResult &Result) {
   if (!SpecialFunctionDecl->isCopyAssignmentOperator() && !Body->body_empty())
     return;
 
+  // If body contain any preprocesor derictives, don't warn.
+  if (IgnoreMacros && utils::lexer::rangeContainsExpansionsOrDirectives(
+                          Body->getSourceRange(), *Result.SourceManager,
+                          Result.Context->getLangOpts()))
+    return;
+
   // If there are comments inside the body, don't do the change.
   bool ApplyFix = SpecialFunctionDecl->isCopyAssignmentOperator() ||
                   bodyEmpty(Result.Context, Body);
 
   std::vector<FixItHint> RemoveInitializers;
-  unsigned MemberType;
+  unsigned MemberType = 0;
   if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(SpecialFunctionDecl)) {
     if (Ctor->getNumParams() == 0) {
       MemberType = 0;

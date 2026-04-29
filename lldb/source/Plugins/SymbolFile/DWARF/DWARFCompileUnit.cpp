@@ -8,14 +8,17 @@
 
 #include "DWARFCompileUnit.h"
 #include "DWARFDebugAranges.h"
+#include "LogChannelDWARF.h"
 #include "SymbolFileDWARFDebugMap.h"
 
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/LineTable.h"
 #include "lldb/Utility/Stream.h"
+#include "llvm/DebugInfo/DWARF/DWARFAddressRange.h"
 
 using namespace lldb;
 using namespace lldb_private;
+using namespace lldb_private::plugin::dwarf;
 
 void DWARFCompileUnit::Dump(Stream *s) const {
   s->Format(
@@ -40,17 +43,16 @@ void DWARFCompileUnit::BuildAddressRangeTable(
 
   const dw_offset_t cu_offset = GetOffset();
   if (die) {
-    DWARFRangeList ranges;
-    const size_t num_ranges =
-        die->GetAttributeAddressRanges(this, ranges, /*check_hi_lo_pc=*/true);
-    if (num_ranges > 0) {
-      for (size_t i = 0; i < num_ranges; ++i) {
-        const DWARFRangeList::Entry &range = ranges.GetEntryRef(i);
-        debug_aranges->AppendRange(cu_offset, range.GetRangeBase(),
-                                   range.GetRangeEnd());
-      }
-
-      return;
+    llvm::Expected<llvm::DWARFAddressRangesVector> ranges =
+        die->GetAttributeAddressRanges(this, /*check_hi_lo_pc=*/true);
+    if (ranges) {
+      for (const llvm::DWARFAddressRange &range : *ranges)
+        debug_aranges->AppendRange(cu_offset, range.LowPC, range.HighPC);
+      if (!ranges->empty())
+        return;
+    } else {
+      LLDB_LOG_ERROR(GetLog(DWARFLog::DebugInfo), ranges.takeError(),
+                     "{1:x}: {0}", cu_offset);
     }
   }
 

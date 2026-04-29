@@ -1,6 +1,8 @@
 ; RUN: llc %s -stop-before finalize-isel -o - \
 ; RUN:    -experimental-debug-variable-locations=false \
+; RUN:    -debug-ata-coalesce-frags=true \
 ; RUN: | FileCheck %s --check-prefixes=CHECK,DBGVALUE --implicit-check-not=DBG_VALUE
+
 ; RUN: llc %s -stop-before finalize-isel -o - \
 ; RUN:    -experimental-debug-variable-locations=true \
 ; RUN: | FileCheck %s --check-prefixes=CHECK,INSTRREF --implicit-check-not=DBG_VALUE \
@@ -37,16 +39,13 @@
 
 ;; Then there is a store to the upper 64 bits.
 ; CHECK: MOV64mi32 %stack.0.X, 1, $noreg, 8, $noreg, 0, debug-location
-;; This DBG_VALUE is added by the mem-loc-frag-fill pass because bits [0, 64)
-;; are still live in memory.
-; CHECK-NEXT: DBG_VALUE %stack.0.X, $noreg, ![[VAR]], !DIExpression(DW_OP_deref, DW_OP_LLVM_fragment, 0, 64)
-; CHECK-NEXT: DBG_VALUE %stack.0.X, $noreg, ![[VAR]], !DIExpression(DW_OP_plus_uconst, 8, DW_OP_deref, DW_OP_LLVM_fragment, 64, 64), debug-location
+;; No change in variable location: the stack home is still valid.
 
 ;; The final assignment (X.B += 2) doesn't get stored back to the alloca. This
 ;; means that that the stack location isn't valid for the entire lifetime of X.
-; DBGVALUE: %2:gr64 = nsw ADD64ri8 %1, 2, implicit-def dead $eflags, debug-location
+; DBGVALUE: %2:gr64 = nsw ADD64ri32 %1, 2, implicit-def dead $eflags, debug-location
 ; DBGVALUE-NEXT: DBG_VALUE %2, $noreg, ![[VAR]], !DIExpression(DW_OP_LLVM_fragment, 64, 64), debug-location
-; INSTRREF: %2:gr64 = nsw ADD64ri8 %1, 2, implicit-def dead $eflags, debug-instr-number 1
+; INSTRREF: %2:gr64 = nsw ADD64ri32 %1, 2, implicit-def dead $eflags, debug-instr-number 1
 ; INSTRREF-NEXT: DBG_INSTR_REF ![[VAR]], !DIExpression(DW_OP_LLVM_arg, 0, DW_OP_LLVM_fragment, 64, 64), dbg-instr-ref(1, 0), debug-location
 
 ;; Bits [0, 64) are still stack homed. FIXME, this particular reinstatement is
@@ -73,9 +72,9 @@ entry:
   ret i64 %add, !dbg !32
 }
 
-declare void @llvm.lifetime.start.p0i8(i64 immarg, ptr nocapture)
+declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture)
 declare !dbg !33 dso_local void @_Z3escPl(ptr) local_unnamed_addr
-declare void @llvm.lifetime.end.p0i8(i64 immarg, ptr nocapture)
+declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture)
 declare void @llvm.dbg.assign(metadata, metadata, metadata, metadata, metadata, metadata)
 
 !llvm.dbg.cu = !{!0}

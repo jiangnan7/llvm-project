@@ -9,7 +9,6 @@
 #include "ThreadCanceltypeAsynchronousCheck.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
-#include "clang/Lex/Preprocessor.h"
 
 using namespace clang::ast_matchers;
 
@@ -18,8 +17,8 @@ namespace clang::tidy::concurrency {
 void ThreadCanceltypeAsynchronousCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       callExpr(
-          allOf(callee(functionDecl(hasName("::pthread_setcanceltype"))),
-                argumentCountIs(2)),
+          callee(functionDecl(hasName("::pthread_setcanceltype"))),
+          argumentCountIs(2),
           hasArgument(0, isExpandedFromMacro("PTHREAD_CANCEL_ASYNCHRONOUS")))
           .bind("setcanceltype"),
       this);

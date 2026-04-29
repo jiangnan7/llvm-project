@@ -87,7 +87,7 @@ void Region::cloneInto(Region *dest, Region::iterator destPos,
   // of the blocks or operation results contained within this region as that
   // would lead to a write in their use-def list. This is unavoidable for
   // 'Value's from outside the region however, in which case it is not read
-  // only. Using the BlockAndValueMapper it is possible to remap such 'Value's
+  // only. Using the IRMapper it is possible to remap such 'Value's
   // to ones owned by the calling thread however, making it read only once
   // again.
 
@@ -267,18 +267,18 @@ RegionRange::RegionRange(ArrayRef<Region *> regions)
 /// See `llvm::detail::indexed_accessor_range_base` for details.
 RegionRange::OwnerT RegionRange::offset_base(const OwnerT &owner,
                                              ptrdiff_t index) {
-  if (auto *region = owner.dyn_cast<const std::unique_ptr<Region> *>())
+  if (auto *region = llvm::dyn_cast_if_present<const std::unique_ptr<Region> *>(owner))
     return region + index;
-  if (auto **region = owner.dyn_cast<Region **>())
+  if (auto **region = llvm::dyn_cast_if_present<Region **>(owner))
     return region + index;
-  return &owner.get<Region *>()[index];
+  return &cast<Region *>(owner)[index];
 }
 /// See `llvm::detail::indexed_accessor_range_base` for details.
 Region *RegionRange::dereference_iterator(const OwnerT &owner,
                                           ptrdiff_t index) {
-  if (auto *region = owner.dyn_cast<const std::unique_ptr<Region> *>())
+  if (auto *region = llvm::dyn_cast_if_present<const std::unique_ptr<Region> *>(owner))
     return region[index].get();
-  if (auto **region = owner.dyn_cast<Region **>())
+  if (auto **region = llvm::dyn_cast_if_present<Region **>(owner))
     return region[index];
-  return &owner.get<Region *>()[index];
+  return &cast<Region *>(owner)[index];
 }

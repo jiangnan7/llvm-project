@@ -28,45 +28,16 @@ AST_MATCHER_P(NamedDecl, usesHeaderFileExtension, FileExtensionsSet,
 DefinitionsInHeadersCheck::DefinitionsInHeadersCheck(StringRef Name,
                                                      ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context),
-      UseHeaderFileExtension(Options.get("UseHeaderFileExtension", true)) {
-  std::optional<StringRef> HeaderFileExtensionsOption =
-      Options.get("HeaderFileExtensions");
-  RawStringHeaderFileExtensions =
-      HeaderFileExtensionsOption.value_or(utils::defaultHeaderFileExtensions());
-  if (HeaderFileExtensionsOption) {
-    if (!utils::parseFileExtensions(RawStringHeaderFileExtensions,
-                                    HeaderFileExtensions,
-                                    utils::defaultFileExtensionDelimiters())) {
-      this->configurationDiag("Invalid header file extension: '%0'")
-          << RawStringHeaderFileExtensions;
-    }
-  } else
-    HeaderFileExtensions = Context->getHeaderFileExtensions();
-}
-
-void DefinitionsInHeadersCheck::storeOptions(
-    ClangTidyOptions::OptionMap &Opts) {
-  Options.store(Opts, "UseHeaderFileExtension", UseHeaderFileExtension);
-  Options.store(Opts, "HeaderFileExtensions", RawStringHeaderFileExtensions);
-}
+      HeaderFileExtensions(Context->getHeaderFileExtensions()) {}
 
 void DefinitionsInHeadersCheck::registerMatchers(MatchFinder *Finder) {
   auto DefinitionMatcher =
       anyOf(functionDecl(isDefinition(), unless(isDeleted())),
             varDecl(isDefinition()));
-  if (UseHeaderFileExtension) {
-    Finder->addMatcher(namedDecl(DefinitionMatcher,
-                                 usesHeaderFileExtension(HeaderFileExtensions))
-                           .bind("name-decl"),
-                       this);
-  } else {
-    Finder->addMatcher(
-        namedDecl(DefinitionMatcher,
-                  anyOf(usesHeaderFileExtension(HeaderFileExtensions),
-                        unless(isExpansionInMainFile())))
-            .bind("name-decl"),
-        this);
-  }
+  Finder->addMatcher(namedDecl(DefinitionMatcher,
+                               usesHeaderFileExtension(HeaderFileExtensions))
+                         .bind("name-decl"),
+                     this);
 }
 
 void DefinitionsInHeadersCheck::check(const MatchFinder::MatchResult &Result) {
@@ -90,13 +61,11 @@ void DefinitionsInHeadersCheck::check(const MatchFinder::MatchResult &Result) {
   // Internal linkage variable definitions are ignored for now:
   //   const int a = 1;
   //   static int b = 1;
+  //   namespace { int c = 1; }
   //
   // Although these might also cause ODR violations, we can be less certain and
   // should try to keep the false-positive rate down.
-  //
-  // FIXME: Should declarations in anonymous namespaces get the same treatment
-  // as static / const declarations?
-  if (!ND->hasExternalFormalLinkage() && !ND->isInAnonymousNamespace())
+  if (!ND->hasExternalFormalLinkage() || ND->isInAnonymousNamespace())
     return;
 
   if (const auto *FD = dyn_cast<FunctionDecl>(ND)) {
@@ -133,7 +102,7 @@ void DefinitionsInHeadersCheck::check(const MatchFinder::MatchResult &Result) {
     // inline is not allowed for main function.
     if (FD->isMain())
       return;
-    diag(FD->getLocation(), /*Description=*/"make as 'inline'",
+    diag(FD->getLocation(), "mark the definition as 'inline'",
          DiagnosticIDs::Note)
         << FixItHint::CreateInsertion(FD->getInnerLocStart(), "inline ");
   } else if (const auto *VD = dyn_cast<VarDecl>(ND)) {

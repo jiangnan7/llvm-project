@@ -106,13 +106,37 @@ struct Derived : Base {
 
 void method() {
   // CHECK: %agg.tmp.ensured = alloca %"struct.GH60166::Derived"
-  // CHECK: %0 = getelementptr inbounds { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 0
+  // CHECK: %0 = getelementptr inbounds nuw { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 0
   // CHECK: store ptr null, ptr %0, align 8
-  // CHECK: %1 = getelementptr inbounds { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 1
+  // CHECK: %1 = getelementptr inbounds nuw { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 1
   // CHECK: store ptr null, ptr %1, align 8
-  // CHECK: %2 = getelementptr inbounds { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 2
+  // CHECK: %2 = getelementptr inbounds nuw { ptr, ptr, ptr }, ptr %agg.tmp.ensured, i32 0, i32 2
   // CHECK: store ptr null, ptr %2, align 8
    (void)Derived();
 }
 
 } // namespace GH60166
+
+namespace GH61142 {
+
+template <typename T>
+struct Test {
+  constexpr static void bar() {
+    foo();
+  }
+  consteval static void foo() {};
+};
+
+consteval void a() {
+  Test<int>::bar();
+}
+
+void b() {
+  Test<int>::bar();
+}
+
+// Make sure consteval function is not emitted.
+// CHECK-NOT: call {{.*}}foo{{.*}}()
+// CHECK-NOT: define {{.*}}foo{{.*}}()
+
+} // namespace GH61142

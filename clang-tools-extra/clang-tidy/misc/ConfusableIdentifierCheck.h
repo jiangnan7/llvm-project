@@ -1,5 +1,4 @@
-//===--- ConfusableIdentifierCheck.h - clang-tidy
-//-------------------------------*- C++ -*-===//
+//===--- ConfusableIdentifierCheck.h - clang-tidy ---------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,6 +10,7 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_CONFUSABLE_IDENTIFIER_CHECK_H
 
 #include "../ClangTidyCheck.h"
+#include "llvm/ADT/DenseMap.h"
 
 namespace clang::tidy::misc {
 
@@ -25,10 +25,18 @@ public:
 
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
+  void onEndOfTranslationUnit() override;
+  std::optional<TraversalKind> getCheckTraversalKind() const override {
+    return TK_IgnoreUnlessSpelledInSource;
+  }
 
 private:
-  std::string skeleton(StringRef);
-  llvm::StringMap<llvm::SmallVector<const NamedDecl *>> Mapper;
+  void addDeclToCheck(const NamedDecl *ND, const Decl *Parent);
+
+  llvm::DenseMap<
+      const IdentifierInfo *,
+      llvm::SmallVector<std::pair<const NamedDecl *, const Decl *>, 1>>
+      NameToDecls;
 };
 
 } // namespace clang::tidy::misc

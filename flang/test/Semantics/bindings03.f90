@@ -1,4 +1,4 @@
-! RUN: %python %S/test_errors.py %s %flang_fc1 -Werror
+! RUN: %python %S/test_errors.py %s %flang_fc1 -Werror -pedantic
 ! Confirm a portability warning on use of a procedure binding apart from a call
 module m
   type t
@@ -15,9 +15,9 @@ program test
   use m
   procedure(sub), pointer :: p
   type(t) x
-  !PORTABILITY: Procedure binding 'sub' used as target of a pointer assignment
+  !PORTABILITY: Procedure binding 'sub' used as target of a pointer assignment [-Wbinding-as-procedure]
   p => x%sub
-  !PORTABILITY: Procedure binding 'sub' passed as an actual argument
+  !PORTABILITY: Procedure binding 'sub' passed as an actual argument [-Wbinding-as-procedure]
   call sub2(x%sub)
  contains
   subroutine sub2(s)

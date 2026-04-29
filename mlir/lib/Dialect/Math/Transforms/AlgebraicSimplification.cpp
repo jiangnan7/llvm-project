@@ -64,7 +64,7 @@ PowFStrengthReduction::matchAndRewrite(math::PowFOp op,
 
   // Maybe broadcasts scalar value into vector type compatible with `op`.
   auto bcast = [&](Value value) -> Value {
-    if (auto vec = op.getType().dyn_cast<VectorType>())
+    if (auto vec = dyn_cast<VectorType>(op.getType()))
       return rewriter.create<vector::BroadcastOp>(op.getLoc(), vec, value);
     return value;
   };
@@ -167,7 +167,7 @@ PowIStrengthReduction<PowIOpTy, DivOpTy, MulOpTy>::matchAndRewrite(
 
   // Maybe broadcasts scalar value into vector type compatible with `op`.
   auto bcast = [&loc, &op, &rewriter](Value value) -> Value {
-    if (auto vec = op.getType().template dyn_cast<VectorType>())
+    if (auto vec = dyn_cast<VectorType>(op.getType()))
       return rewriter.create<vector::BroadcastOp>(loc, vec, value);
     return value;
   };
@@ -197,11 +197,6 @@ PowIStrengthReduction<PowIOpTy, DivOpTy, MulOpTy>::matchAndRewrite(
   if (exponentValue > exponentThreshold)
     return failure();
 
-  // Inverse the base for negative exponent, i.e. for
-  // `[fi]powi(x, negative_exponent)` set `x` to `1 / x`.
-  if (exponentIsNegative)
-    base = rewriter.create<DivOpTy>(loc, bcast(one), base);
-
   Value result = base;
   // Transform to naive sequence of multiplications:
   //   * For positive exponent case replace:
@@ -214,6 +209,11 @@ PowIStrengthReduction<PowIOpTy, DivOpTy, MulOpTy>::matchAndRewrite(
   //       (1 / x) * (1 / x) * (1 / x) * ...
   for (unsigned i = 1; i < exponentValue; ++i)
     result = rewriter.create<MulOpTy>(loc, result, base);
+
+  // Inverse the base for negative exponent, i.e. for
+  // `[fi]powi(x, negative_exponent)` set `x` to `1 / x`.
+  if (exponentIsNegative)
+    result = rewriter.create<DivOpTy>(loc, bcast(one), result);
 
   rewriter.replaceOp(op, result);
   return success();

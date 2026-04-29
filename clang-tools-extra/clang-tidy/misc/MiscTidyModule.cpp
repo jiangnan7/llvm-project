@@ -11,7 +11,10 @@
 #include "../ClangTidyModuleRegistry.h"
 #include "ConfusableIdentifierCheck.h"
 #include "ConstCorrectnessCheck.h"
+#include "CoroutineHostileRAIICheck.h"
 #include "DefinitionsInHeadersCheck.h"
+#include "HeaderIncludeCycleCheck.h"
+#include "IncludeCleanerCheck.h"
 #include "MisleadingBidirectional.h"
 #include "MisleadingIdentifier.h"
 #include "MisplacedConstCheck.h"
@@ -28,6 +31,7 @@
 #include "UnusedParametersCheck.h"
 #include "UnusedUsingDeclsCheck.h"
 #include "UseAnonymousNamespaceCheck.h"
+#include "UseInternalLinkageCheck.h"
 
 namespace clang::tidy {
 namespace misc {
@@ -39,8 +43,13 @@ public:
         "misc-confusable-identifiers");
     CheckFactories.registerCheck<ConstCorrectnessCheck>(
         "misc-const-correctness");
+    CheckFactories.registerCheck<CoroutineHostileRAIICheck>(
+        "misc-coroutine-hostile-raii");
     CheckFactories.registerCheck<DefinitionsInHeadersCheck>(
         "misc-definitions-in-headers");
+    CheckFactories.registerCheck<HeaderIncludeCycleCheck>(
+        "misc-header-include-cycle");
+    CheckFactories.registerCheck<IncludeCleanerCheck>("misc-include-cleaner");
     CheckFactories.registerCheck<MisleadingBidirectionalCheck>(
         "misc-misleading-bidirectional");
     CheckFactories.registerCheck<MisleadingIdentifierCheck>(
@@ -70,6 +79,8 @@ public:
         "misc-unused-using-decls");
     CheckFactories.registerCheck<UseAnonymousNamespaceCheck>(
         "misc-use-anonymous-namespace");
+    CheckFactories.registerCheck<UseInternalLinkageCheck>(
+        "misc-use-internal-linkage");
   }
 };
 
@@ -81,6 +92,6 @@ static ClangTidyModuleRegistry::Add<misc::MiscModule>
 
 // This anchor is used to force the linker to link in the generated object file
 // and thus register the MiscModule.
-volatile int MiscModuleAnchorSource = 0;
+volatile int MiscModuleAnchorSource = 0; // NOLINT(misc-use-internal-linkage)
 
 } // namespace clang::tidy

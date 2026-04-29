@@ -24,6 +24,7 @@
 #endif
 
 #include "enum-class.h"
+#include "variant.h"
 #include "visit.h"
 #include <array>
 #include <functional>
@@ -33,7 +34,6 @@
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <variant>
 
 #if __GNUC__ == 7
 // Avoid a deduction bug in GNU 7.x headers by forcing the answer.
@@ -89,6 +89,11 @@ template <typename... LAMBDAS> visitors(LAMBDAS... x) -> visitors<LAMBDAS...>;
 #define CHECK(x) ((x) || (DIE("CHECK(" #x ") failed"), false))
 #endif
 
+// Same as above, but with a custom error message.
+#ifndef CHECK_MSG
+#define CHECK_MSG(x, y) ((x) || (DIE("CHECK(" #x ") failed: " #y), false))
+#endif
+
 // User-defined type traits that default to false:
 // Invoke CLASS_TRAIT(traitName) to define a trait, then put
 //   using traitName = std::true_type;  (or false_type)
@@ -111,20 +116,6 @@ template <typename... LAMBDAS> visitors(LAMBDAS... x) -> visitors<LAMBDAS...>;
     } \
   } \
   template <typename A> constexpr bool T{class_trait_ns_##T::trait_value<A>()};
-
-// Define enum class NAME with the given enumerators,
-// - a static function EnumToString() that maps enumerators to std::string,
-// - a constant NAME_enumSize that captures the number of items in the enum,
-// - a struct NAME_struct that implements a Meyers singleton to hold the mapping
-// from index to names
-
-void BuildIndexToString(
-    const char *commaSeparated, std::string enumNames[], int enumSize);
-
-template <typename A> struct ListItemCount {
-  constexpr ListItemCount(std::initializer_list<A> list) : value{list.size()} {}
-  const std::size_t value;
-};
 
 // Check that a pointer is non-null and dereference it
 #define DEREF(p) Fortran::common::Deref(p, __FILE__, __LINE__)

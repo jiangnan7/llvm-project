@@ -24,7 +24,8 @@ using namespace mlir;
 /// Create a function with the same signature as the parent function of `op`
 /// with name being the function name and a `suffix`.
 static LogicalResult createBackwardSliceFunction(Operation *op,
-                                                 StringRef suffix) {
+                                                 StringRef suffix,
+                                                 bool omitBlockArguments) {
   func::FuncOp parentFuncOp = op->getParentOfType<func::FuncOp>();
   OpBuilder builder(parentFuncOp);
   Location loc = op->getLoc();
@@ -36,7 +37,13 @@ static LogicalResult createBackwardSliceFunction(Operation *op,
   for (const auto &arg : enumerate(parentFuncOp.getArguments()))
     mapper.map(arg.value(), clonedFuncOp.getArgument(arg.index()));
   SetVector<Operation *> slice;
-  getBackwardSlice(op, &slice);
+  BackwardSliceOptions options;
+  options.omitBlockArguments = omitBlockArguments;
+  // TODO: Make this default.
+  options.omitUsesFromAbove = false;
+  LogicalResult result = getBackwardSlice(op, &slice, options);
+  assert(result.succeeded() && "expected a backward slice");
+  (void)result;
   for (Operation *slicedOp : slice)
     builder.clone(*slicedOp, mapper);
   builder.create<func::ReturnOp>(loc);
@@ -53,6 +60,13 @@ struct SliceAnalysisTestPass
   StringRef getDescription() const final {
     return "Test Slice analysis functionality.";
   }
+
+  Option<bool> omitBlockArguments{
+      *this, "omit-block-arguments",
+      llvm::cl::desc("Test Slice analysis with multiple blocks but slice "
+                     "omiting block arguments"),
+      llvm::cl::init(true)};
+
   void runOnOperation() override;
   SliceAnalysisTestPass() = default;
   SliceAnalysisTestPass(const SliceAnalysisTestPass &) {}
@@ -64,11 +78,6 @@ void SliceAnalysisTestPass::runOnOperation() {
   auto funcOps = module.getOps<func::FuncOp>();
   unsigned opNum = 0;
   for (auto funcOp : funcOps) {
-    if (!llvm::hasSingleElement(funcOp.getBody())) {
-      funcOp->emitOpError("Does not support functions with multiple blocks");
-      signalPassFailure();
-      return;
-    }
     // TODO: For now this is just looking for Linalg ops. It can be generalized
     // to look for other ops using flags.
     funcOp.walk([&](Operation *op) {
@@ -76,7 +85,7 @@ void SliceAnalysisTestPass::runOnOperation() {
         return WalkResult::advance();
       std::string append =
           std::string("__backward_slice__") + std::to_string(opNum);
-      (void)createBackwardSliceFunction(op, append);
+      (void)createBackwardSliceFunction(op, append, omitBlockArguments);
       opNum++;
       return WalkResult::advance();
     });

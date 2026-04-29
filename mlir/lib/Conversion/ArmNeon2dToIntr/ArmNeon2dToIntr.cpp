@@ -16,7 +16,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 namespace mlir {
-#define GEN_PASS_DEF_CONVERTARMNEON2DTOINTR
+#define GEN_PASS_DEF_CONVERTARMNEON2DTOINTRPASS
 #include "mlir/Conversion/Passes.h.inc"
 } // namespace mlir
 
@@ -33,8 +33,8 @@ public:
   /// arm.neon.intr.sdot
   LogicalResult matchAndRewrite(Sdot2dOp op,
                                 PatternRewriter &rewriter) const override {
-    Type elemType = op.getB().getType().cast<VectorType>().getElementType();
-    int length = op.getB().getType().cast<VectorType>().getShape()[0] *
+    Type elemType = cast<VectorType>(op.getB().getType()).getElementType();
+    int length = cast<VectorType>(op.getB().getType()).getShape()[0] *
                  Sdot2dOp::kReductionSize;
     VectorType flattenedVectorType = VectorType::get({length}, elemType);
     Value b2d = op.getB();
@@ -52,15 +52,14 @@ public:
 };
 
 class ConvertArmNeon2dToIntr
-    : public impl::ConvertArmNeon2dToIntrBase<ConvertArmNeon2dToIntr> {
+    : public impl::ConvertArmNeon2dToIntrPassBase<ConvertArmNeon2dToIntr> {
   void runOnOperation() override {
     auto *context = &getContext();
 
     RewritePatternSet patterns(context);
     populateConvertArmNeon2dToIntrPatterns(patterns);
 
-    if (failed(
-            applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
+    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
       return signalPassFailure();
   }
 };
@@ -69,8 +68,4 @@ class ConvertArmNeon2dToIntr
 
 void mlir::populateConvertArmNeon2dToIntrPatterns(RewritePatternSet &patterns) {
   patterns.add<Sdot2dLoweringPattern>(patterns.getContext());
-}
-
-std::unique_ptr<Pass> mlir::createConvertArmNeon2dToIntrPass() {
-  return std::make_unique<ConvertArmNeon2dToIntr>();
 }

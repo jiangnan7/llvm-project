@@ -44,9 +44,9 @@ define <16 x i8> @add_sat_u_v16i8(<16 x i8> %x, <16 x i8> %y) {
 ; CHECK-NEXT: .functype sub_sat_s_v16i8 (v128, v128) -> (v128){{$}}
 ; CHECK-NEXT: i8x16.sub_sat_s $push[[R:[0-9]+]]=, $0, $1{{$}}
 ; CHECK-NEXT: return $pop[[R]]{{$}}
-declare <16 x i8> @llvm.wasm.sub.sat.signed.v16i8(<16 x i8>, <16 x i8>)
+declare <16 x i8> @llvm.ssub.sat.v16i8(<16 x i8>, <16 x i8>)
 define <16 x i8> @sub_sat_s_v16i8(<16 x i8> %x, <16 x i8> %y) {
-  %a = call <16 x i8> @llvm.wasm.sub.sat.signed.v16i8(
+  %a = call <16 x i8> @llvm.ssub.sat.v16i8(
     <16 x i8> %x, <16 x i8> %y
   )
   ret <16 x i8> %a
@@ -56,9 +56,9 @@ define <16 x i8> @sub_sat_s_v16i8(<16 x i8> %x, <16 x i8> %y) {
 ; CHECK-NEXT: .functype sub_sat_u_v16i8 (v128, v128) -> (v128){{$}}
 ; CHECK-NEXT: i8x16.sub_sat_u $push[[R:[0-9]+]]=, $0, $1{{$}}
 ; CHECK-NEXT: return $pop[[R]]{{$}}
-declare <16 x i8> @llvm.wasm.sub.sat.unsigned.v16i8(<16 x i8>, <16 x i8>)
+declare <16 x i8> @llvm.usub.sat.v16i8(<16 x i8>, <16 x i8>)
 define <16 x i8> @sub_sat_u_v16i8(<16 x i8> %x, <16 x i8> %y) {
-  %a = call <16 x i8> @llvm.wasm.sub.sat.unsigned.v16i8(
+  %a = call <16 x i8> @llvm.usub.sat.v16i8(
     <16 x i8> %x, <16 x i8> %y
   )
   ret <16 x i8> %a
@@ -157,26 +157,13 @@ define <16 x i8> @narrow_unsigned_v16i8(<8 x i16> %low, <8 x i16> %high) {
 ; CHECK-SAME: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0{{$}}
 ; CHECK-NEXT: return $pop[[R]]{{$}}
 declare <16 x i8> @llvm.wasm.shuffle(
-  <16 x i8>, <16 x i8>, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32,
-  i32, i32, i32, i32, i32)
+  <16 x i8>, <16 x i8>, i32 immarg, i32 immarg, i32 immarg, i32 immarg,
+  i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32 immarg,
+  i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32 immarg, i32 immarg)
 define <16 x i8> @shuffle_v16i8(<16 x i8> %x, <16 x i8> %y) {
   %res = call <16 x i8> @llvm.wasm.shuffle(<16 x i8> %x, <16 x i8> %y,
       i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7,
       i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 35)
-  ret <16 x i8> %res
-}
-
-; CHECK-LABEL: shuffle_undef_v16i8:
-; NO-CHECK-NOT: i8x16
-; CHECK-NEXT: .functype shuffle_undef_v16i8 (v128, v128) -> (v128){{$}}
-; CHECK-NEXT: i8x16.shuffle $push[[R:[0-9]+]]=, $0, $1,
-; CHECK-SAME: 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2{{$}}
-; CHECK-NEXT: return $pop[[R]]{{$}}
-define <16 x i8> @shuffle_undef_v16i8(<16 x i8> %x, <16 x i8> %y) {
-  %res = call <16 x i8> @llvm.wasm.shuffle(<16 x i8> %x, <16 x i8> %y,
-      i32 1, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef,
-      i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef,
-      i32 undef, i32 undef, i32 undef, i32 2)
   ret <16 x i8> %res
 }
 
@@ -229,9 +216,9 @@ define <8 x i16> @add_sat_u_v8i16(<8 x i16> %x, <8 x i16> %y) {
 ; CHECK-NEXT: .functype sub_sat_s_v8i16 (v128, v128) -> (v128){{$}}
 ; CHECK-NEXT: i16x8.sub_sat_s $push[[R:[0-9]+]]=, $0, $1{{$}}
 ; CHECK-NEXT: return $pop[[R]]{{$}}
-declare <8 x i16> @llvm.wasm.sub.sat.signed.v8i16(<8 x i16>, <8 x i16>)
+declare <8 x i16> @llvm.ssub.sat.v8i16(<8 x i16>, <8 x i16>)
 define <8 x i16> @sub_sat_s_v8i16(<8 x i16> %x, <8 x i16> %y) {
-  %a = call <8 x i16> @llvm.wasm.sub.sat.signed.v8i16(
+  %a = call <8 x i16> @llvm.ssub.sat.v8i16(
     <8 x i16> %x, <8 x i16> %y
   )
   ret <8 x i16> %a
@@ -241,9 +228,9 @@ define <8 x i16> @sub_sat_s_v8i16(<8 x i16> %x, <8 x i16> %y) {
 ; CHECK-NEXT: .functype sub_sat_u_v8i16 (v128, v128) -> (v128){{$}}
 ; CHECK-NEXT: i16x8.sub_sat_u $push[[R:[0-9]+]]=, $0, $1{{$}}
 ; CHECK-NEXT: return $pop[[R]]{{$}}
-declare <8 x i16> @llvm.wasm.sub.sat.unsigned.v8i16(<8 x i16>, <8 x i16>)
+declare <8 x i16> @llvm.usub.sat.v8i16(<8 x i16>, <8 x i16>)
 define <8 x i16> @sub_sat_u_v8i16(<8 x i16> %x, <8 x i16> %y) {
-  %a = call <8 x i16> @llvm.wasm.sub.sat.unsigned.v8i16(
+  %a = call <8 x i16> @llvm.usub.sat.v8i16(
     <8 x i16> %x, <8 x i16> %y
   )
   ret <8 x i16> %a
@@ -738,6 +725,26 @@ define <4 x float> @nearest_v4f32(<4 x float> %a) {
   ret <4 x float> %v
 }
 
+; CHECK-LABEL: nearest_v4f32_via_rint:
+; CHECK-NEXT: .functype nearest_v4f32_via_rint (v128) -> (v128){{$}}
+; CHECK-NEXT: f32x4.nearest $push[[R:[0-9]+]]=, $0{{$}}
+; CHECK-NEXT: return $pop[[R]]{{$}}
+declare <4 x float> @llvm.rint.v4f32(<4 x float>)
+define <4 x float> @nearest_v4f32_via_rint(<4 x float> %a) {
+  %v = call <4 x float> @llvm.rint.v4f32(<4 x float> %a)
+  ret <4 x float> %v
+}
+
+; CHECK-LABEL: nearest_v4f32_via_roundeven:
+; CHECK-NEXT: .functype nearest_v4f32_via_roundeven (v128) -> (v128){{$}}
+; CHECK-NEXT: f32x4.nearest $push[[R:[0-9]+]]=, $0{{$}}
+; CHECK-NEXT: return $pop[[R]]{{$}}
+declare <4 x float> @llvm.roundeven.v4f32(<4 x float>)
+define <4 x float> @nearest_v4f32_via_roundeven(<4 x float> %a) {
+  %v = call <4 x float> @llvm.roundeven.v4f32(<4 x float> %a)
+  ret <4 x float> %v
+}
+
 ; CHECK-LABEL: madd_v4f32:
 ; CHECK-NEXT: .functype madd_v4f32 (v128, v128, v128) -> (v128){{$}}
 ; CHECK-NEXT: f32x4.relaxed_madd $push[[R:[0-9]+]]=, $0, $1, $2{{$}}
@@ -872,6 +879,26 @@ define <2 x double> @trunc_v2f64(<2 x double> %a) {
 declare <2 x double> @llvm.nearbyint.v2f64(<2 x double>)
 define <2 x double> @nearest_v2f64(<2 x double> %a) {
   %v = call <2 x double> @llvm.nearbyint.v2f64(<2 x double> %a)
+  ret <2 x double> %v
+}
+
+; CHECK-LABEL: nearest_v2f64_via_rint:
+; CHECK-NEXT: .functype nearest_v2f64_via_rint (v128) -> (v128){{$}}
+; CHECK-NEXT: f64x2.nearest $push[[R:[0-9]+]]=, $0{{$}}
+; CHECK-NEXT: return $pop[[R]]{{$}}
+declare <2 x double> @llvm.rint.v2f64(<2 x double>)
+define <2 x double> @nearest_v2f64_via_rint(<2 x double> %a) {
+  %v = call <2 x double> @llvm.rint.v2f64(<2 x double> %a)
+  ret <2 x double> %v
+}
+
+; CHECK-LABEL: nearest_v2f64_via_roundeven:
+; CHECK-NEXT: .functype nearest_v2f64_via_roundeven (v128) -> (v128){{$}}
+; CHECK-NEXT: f64x2.nearest $push[[R:[0-9]+]]=, $0{{$}}
+; CHECK-NEXT: return $pop[[R]]{{$}}
+declare <2 x double> @llvm.roundeven.v2f64(<2 x double>)
+define <2 x double> @nearest_v2f64_via_roundeven(<2 x double> %a) {
+  %v = call <2 x double> @llvm.roundeven.v2f64(<2 x double> %a)
   ret <2 x double> %v
 }
 

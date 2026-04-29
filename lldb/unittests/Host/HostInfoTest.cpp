@@ -54,10 +54,16 @@ TEST_F(HostInfoTest, GetHostname) {
   EXPECT_TRUE(HostInfo::GetHostname(s));
 }
 
+TEST_F(HostInfoTest, GetProgramFileSpec) {
+  FileSpec filespec = HostInfo::GetProgramFileSpec();
+  EXPECT_TRUE(FileSystem::Instance().Exists(filespec));
+}
+
 #if defined(__APPLE__)
 TEST_F(HostInfoTest, GetXcodeSDK) {
   auto get_sdk = [](std::string sdk, bool error = false) -> llvm::StringRef {
-    auto sdk_path_or_err = HostInfo::GetXcodeSDKPath(XcodeSDK(std::move(sdk)));
+    auto sdk_path_or_err =
+        HostInfo::GetSDKRoot(HostInfo::SDKOptions{XcodeSDK(std::move(sdk))});
     if (!error) {
       EXPECT_TRUE((bool)sdk_path_or_err);
       return *sdk_path_or_err;
@@ -71,6 +77,23 @@ TEST_F(HostInfoTest, GetXcodeSDK) {
   EXPECT_FALSE(get_sdk("MacOSX9999.sdk").empty());
   // This is expected to fail.
   EXPECT_TRUE(get_sdk("CeciNestPasUnOS.sdk", true).empty());
+}
+
+TEST_F(HostInfoTest, FindSDKTool) {
+  auto find_tool = [](std::string sdk, llvm::StringRef tool,
+                      bool error = false) -> llvm::StringRef {
+    auto sdk_path_or_err =
+        HostInfo::FindSDKTool(XcodeSDK(std::move(sdk)), tool);
+    if (!error) {
+      EXPECT_TRUE((bool)sdk_path_or_err);
+      return *sdk_path_or_err;
+    }
+    EXPECT_FALSE((bool)sdk_path_or_err);
+    llvm::consumeError(sdk_path_or_err.takeError());
+    return {};
+  };
+  EXPECT_FALSE(find_tool("MacOSX.sdk", "clang").empty());
+  EXPECT_TRUE(find_tool("MacOSX.sdk", "CeciNestPasUnOutil").empty());
 }
 #endif
 
@@ -86,3 +109,26 @@ TEST(HostInfoTestInitialization, InitTwice) {
     EXPECT_EQ(Version, HostInfo::GetOSVersion());
   }
 }
+
+#ifdef __APPLE__
+struct HostInfoTester : public HostInfoMacOSX {
+public:
+  using HostInfoMacOSX::FindComponentInPath;
+};
+
+TEST_F(HostInfoTest, FindComponentInPath) {
+  EXPECT_EQ("/path/to/foo",
+            HostInfoTester::FindComponentInPath("/path/to/foo/", "foo"));
+
+  EXPECT_EQ("/path/to/foo",
+            HostInfoTester::FindComponentInPath("/path/to/foo", "foo"));
+
+  EXPECT_EQ("/path/to/foobar",
+            HostInfoTester::FindComponentInPath("/path/to/foobar", "foo"));
+
+  EXPECT_EQ("/path/to/foobar",
+            HostInfoTester::FindComponentInPath("/path/to/foobar", "bar"));
+
+  EXPECT_EQ("", HostInfoTester::FindComponentInPath("/path/to/foo", "bar"));
+}
+#endif

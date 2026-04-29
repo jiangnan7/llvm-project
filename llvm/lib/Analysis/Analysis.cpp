@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm-c/Analysis.h"
-#include "llvm-c/Initialization.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/InitializePasses.h"
@@ -19,23 +18,20 @@ using namespace llvm;
 
 /// initializeAnalysis - Initialize all passes linked into the Analysis library.
 void llvm::initializeAnalysis(PassRegistry &Registry) {
-  initializeAAEvalLegacyPassPass(Registry);
+  initializeAssumptionCacheTrackerPass(Registry);
   initializeBasicAAWrapperPassPass(Registry);
   initializeBlockFrequencyInfoWrapperPassPass(Registry);
   initializeBranchProbabilityInfoWrapperPassPass(Registry);
   initializeCallGraphWrapperPassPass(Registry);
   initializeCallGraphDOTPrinterPass(Registry);
-  initializeCallGraphPrinterLegacyPassPass(Registry);
   initializeCallGraphViewerPass(Registry);
-  initializeCostModelAnalysisPass(Registry);
-  initializeCFGViewerLegacyPassPass(Registry);
-  initializeCFGPrinterLegacyPassPass(Registry);
-  initializeCFGOnlyViewerLegacyPassPass(Registry);
-  initializeCFGOnlyPrinterLegacyPassPass(Registry);
   initializeCycleInfoWrapperPassPass(Registry);
+  initializeDXILMetadataAnalysisWrapperPassPass(Registry);
+  initializeDXILResourceWrapperPassPass(Registry);
+  initializeDXILResourceBindingWrapperPassPass(Registry);
+  initializeDXILResourceTypeWrapperPassPass(Registry);
+  initializeDXILResourceWrapperPassPass(Registry);
   initializeDependenceAnalysisWrapperPassPass(Registry);
-  initializeDelinearizationPass(Registry);
-  initializeDemandedBitsWrapperPassPass(Registry);
   initializeDominanceFrontierWrapperPassPass(Registry);
   initializeDomViewerWrapperPassPass(Registry);
   initializeDomPrinterWrapperPassPass(Registry);
@@ -47,27 +43,21 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializePostDomOnlyPrinterWrapperPassPass(Registry);
   initializeAAResultsWrapperPassPass(Registry);
   initializeGlobalsAAWrapperPassPass(Registry);
+  initializeExternalAAWrapperPassPass(Registry);
+  initializeImmutableModuleSummaryIndexWrapperPassPass(Registry);
   initializeIVUsersWrapperPassPass(Registry);
-  initializeInstCountLegacyPassPass(Registry);
-  initializeIntervalPartitionPass(Registry);
   initializeIRSimilarityIdentifierWrapperPassPass(Registry);
   initializeLazyBranchProbabilityInfoPassPass(Registry);
+  initializeLazyBFIPassPass(Registry);
   initializeLazyBlockFrequencyInfoPassPass(Registry);
   initializeLazyValueInfoWrapperPassPass(Registry);
-  initializeLazyValueInfoPrinterPass(Registry);
-  initializeLegacyDivergenceAnalysisPass(Registry);
-  initializeLintLegacyPassPass(Registry);
   initializeLoopInfoWrapperPassPass(Registry);
-  initializeMemDepPrinterPass(Registry);
-  initializeMemDerefPrinterPass(Registry);
   initializeMemoryDependenceWrapperPassPass(Registry);
-  initializeModuleDebugInfoLegacyPrinterPass(Registry);
   initializeModuleSummaryIndexWrapperPassPass(Registry);
-  initializeMustExecutePrinterPass(Registry);
-  initializeMustBeExecutedContextPrinterPass(Registry);
   initializeOptimizationRemarkEmitterWrapperPassPass(Registry);
   initializePhiValuesWrapperPassPass(Registry);
   initializePostDominatorTreeWrapperPassPass(Registry);
+  initializeProfileSummaryInfoWrapperPassPass(Registry);
   initializeRegionInfoPassPass(Registry);
   initializeRegionViewerPass(Registry);
   initializeRegionPrinterPass(Registry);
@@ -77,20 +67,14 @@ void llvm::initializeAnalysis(PassRegistry &Registry) {
   initializeScalarEvolutionWrapperPassPass(Registry);
   initializeStackSafetyGlobalInfoWrapperPassPass(Registry);
   initializeStackSafetyInfoWrapperPassPass(Registry);
+  initializeTargetLibraryInfoWrapperPassPass(Registry);
   initializeTargetTransformInfoWrapperPassPass(Registry);
   initializeTypeBasedAAWrapperPassPass(Registry);
   initializeScopedNoAliasAAWrapperPassPass(Registry);
+  initializeStaticDataProfileInfoWrapperPassPass(Registry);
   initializeLCSSAVerificationPassPass(Registry);
   initializeMemorySSAWrapperPassPass(Registry);
-  initializeMemorySSAPrinterLegacyPassPass(Registry);
-}
-
-void LLVMInitializeAnalysis(LLVMPassRegistryRef R) {
-  initializeAnalysis(*unwrap(R));
-}
-
-void LLVMInitializeIPA(LLVMPassRegistryRef R) {
-  initializeAnalysis(*unwrap(R));
+  initializeUniformityInfoWrapperPassPass(Registry);
 }
 
 LLVMBool LLVMVerifyModule(LLVMModuleRef M, LLVMVerifierFailureAction Action,

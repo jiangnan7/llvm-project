@@ -12,6 +12,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/InterleavedRange.h"
 
 using namespace mlir;
 using namespace mlir::spirv;
@@ -145,22 +146,24 @@ StringRef spirv::InterfaceVarABIAttr::getKindName() {
 }
 
 uint32_t spirv::InterfaceVarABIAttr::getBinding() {
-  return getImpl()->binding.cast<IntegerAttr>().getInt();
+  return llvm::cast<IntegerAttr>(getImpl()->binding).getInt();
 }
 
 uint32_t spirv::InterfaceVarABIAttr::getDescriptorSet() {
-  return getImpl()->descriptorSet.cast<IntegerAttr>().getInt();
+  return llvm::cast<IntegerAttr>(getImpl()->descriptorSet).getInt();
 }
 
 std::optional<spirv::StorageClass>
 spirv::InterfaceVarABIAttr::getStorageClass() {
   if (getImpl()->storageClass)
     return static_cast<spirv::StorageClass>(
-        getImpl()->storageClass.cast<IntegerAttr>().getValue().getZExtValue());
+        llvm::cast<IntegerAttr>(getImpl()->storageClass)
+            .getValue()
+            .getZExtValue());
   return std::nullopt;
 }
 
-LogicalResult spirv::InterfaceVarABIAttr::verify(
+LogicalResult spirv::InterfaceVarABIAttr::verifyInvariants(
     function_ref<InFlightDiagnostic()> emitError, IntegerAttr descriptorSet,
     IntegerAttr binding, IntegerAttr storageClass) {
   if (!descriptorSet.getType().isSignlessInteger(32))
@@ -170,7 +173,7 @@ LogicalResult spirv::InterfaceVarABIAttr::verify(
     return emitError() << "expected 32-bit integer for binding";
 
   if (storageClass) {
-    if (auto storageClassAttr = storageClass.cast<IntegerAttr>()) {
+    if (auto storageClassAttr = llvm::cast<IntegerAttr>(storageClass)) {
       auto storageClassValue =
           spirv::symbolizeStorageClass(storageClassAttr.getInt());
       if (!storageClassValue)
@@ -219,14 +222,14 @@ StringRef spirv::VerCapExtAttr::getKindName() { return "vce"; }
 
 spirv::Version spirv::VerCapExtAttr::getVersion() {
   return static_cast<spirv::Version>(
-      getImpl()->version.cast<IntegerAttr>().getValue().getZExtValue());
+      llvm::cast<IntegerAttr>(getImpl()->version).getValue().getZExtValue());
 }
 
 spirv::VerCapExtAttr::ext_iterator::ext_iterator(ArrayAttr::iterator it)
     : llvm::mapped_iterator<ArrayAttr::iterator,
                             spirv::Extension (*)(Attribute)>(
           it, [](Attribute attr) {
-            return *symbolizeExtension(attr.cast<StringAttr>().getValue());
+            return *symbolizeExtension(llvm::cast<StringAttr>(attr).getValue());
           }) {}
 
 spirv::VerCapExtAttr::ext_range spirv::VerCapExtAttr::getExtensions() {
@@ -235,7 +238,7 @@ spirv::VerCapExtAttr::ext_range spirv::VerCapExtAttr::getExtensions() {
 }
 
 ArrayAttr spirv::VerCapExtAttr::getExtensionsAttr() {
-  return getImpl()->extensions.cast<ArrayAttr>();
+  return llvm::cast<ArrayAttr>(getImpl()->extensions);
 }
 
 spirv::VerCapExtAttr::cap_iterator::cap_iterator(ArrayAttr::iterator it)
@@ -243,7 +246,7 @@ spirv::VerCapExtAttr::cap_iterator::cap_iterator(ArrayAttr::iterator it)
                             spirv::Capability (*)(Attribute)>(
           it, [](Attribute attr) {
             return *symbolizeCapability(
-                attr.cast<IntegerAttr>().getValue().getZExtValue());
+                llvm::cast<IntegerAttr>(attr).getValue().getZExtValue());
           }) {}
 
 spirv::VerCapExtAttr::cap_range spirv::VerCapExtAttr::getCapabilities() {
@@ -252,18 +255,17 @@ spirv::VerCapExtAttr::cap_range spirv::VerCapExtAttr::getCapabilities() {
 }
 
 ArrayAttr spirv::VerCapExtAttr::getCapabilitiesAttr() {
-  return getImpl()->capabilities.cast<ArrayAttr>();
+  return llvm::cast<ArrayAttr>(getImpl()->capabilities);
 }
 
-LogicalResult
-spirv::VerCapExtAttr::verify(function_ref<InFlightDiagnostic()> emitError,
-                             IntegerAttr version, ArrayAttr capabilities,
-                             ArrayAttr extensions) {
+LogicalResult spirv::VerCapExtAttr::verifyInvariants(
+    function_ref<InFlightDiagnostic()> emitError, IntegerAttr version,
+    ArrayAttr capabilities, ArrayAttr extensions) {
   if (!version.getType().isSignlessInteger(32))
     return emitError() << "expected 32-bit integer for version";
 
   if (!llvm::all_of(capabilities.getValue(), [](Attribute attr) {
-        if (auto intAttr = attr.dyn_cast<IntegerAttr>())
+        if (auto intAttr = llvm::dyn_cast<IntegerAttr>(attr))
           if (spirv::symbolizeCapability(intAttr.getValue().getZExtValue()))
             return true;
         return false;
@@ -271,7 +273,7 @@ spirv::VerCapExtAttr::verify(function_ref<InFlightDiagnostic()> emitError,
     return emitError() << "unknown capability in capability list";
 
   if (!llvm::all_of(extensions.getValue(), [](Attribute attr) {
-        if (auto strAttr = attr.dyn_cast<StringAttr>())
+        if (auto strAttr = llvm::dyn_cast<StringAttr>(attr))
           if (spirv::symbolizeExtension(strAttr.getValue()))
             return true;
         return false;
@@ -297,7 +299,7 @@ spirv::TargetEnvAttr spirv::TargetEnvAttr::get(
 StringRef spirv::TargetEnvAttr::getKindName() { return "target_env"; }
 
 spirv::VerCapExtAttr spirv::TargetEnvAttr::getTripleAttr() const {
-  return getImpl()->triple.cast<spirv::VerCapExtAttr>();
+  return llvm::cast<spirv::VerCapExtAttr>(getImpl()->triple);
 }
 
 spirv::Version spirv::TargetEnvAttr::getVersion() const {
@@ -337,7 +339,7 @@ uint32_t spirv::TargetEnvAttr::getDeviceID() const {
 }
 
 spirv::ResourceLimitsAttr spirv::TargetEnvAttr::getResourceLimits() const {
-  return getImpl()->limits.cast<spirv::ResourceLimitsAttr>();
+  return llvm::cast<spirv::ResourceLimitsAttr>(getImpl()->limits);
 }
 
 //===----------------------------------------------------------------------===//
@@ -620,17 +622,14 @@ Attribute SPIRVDialect::parseAttribute(DialectAsmParser &parser,
 //===----------------------------------------------------------------------===//
 
 static void print(spirv::VerCapExtAttr triple, DialectAsmPrinter &printer) {
-  auto &os = printer.getStream();
   printer << spirv::VerCapExtAttr::getKindName() << "<"
-          << spirv::stringifyVersion(triple.getVersion()) << ", [";
-  llvm::interleaveComma(
-      triple.getCapabilities(), os,
-      [&](spirv::Capability cap) { os << spirv::stringifyCapability(cap); });
-  printer << "], [";
-  llvm::interleaveComma(triple.getExtensionsAttr(), os, [&](Attribute attr) {
-    os << attr.cast<StringAttr>().getValue();
-  });
-  printer << "]>";
+          << spirv::stringifyVersion(triple.getVersion()) << ", "
+          << llvm::interleaved_array(llvm::map_range(
+                 triple.getCapabilities(), spirv::stringifyCapability))
+          << ", "
+          << llvm::interleaved_array(
+                 triple.getExtensionsAttr().getAsValueRange<StringAttr>())
+          << ">";
 }
 
 static void print(spirv::TargetEnvAttr targetEnv, DialectAsmPrinter &printer) {
@@ -669,11 +668,11 @@ void SPIRVDialect::printAttribute(Attribute attr,
   if (succeeded(generatedAttributePrinter(attr, printer)))
     return;
 
-  if (auto targetEnv = attr.dyn_cast<TargetEnvAttr>())
+  if (auto targetEnv = llvm::dyn_cast<TargetEnvAttr>(attr))
     print(targetEnv, printer);
-  else if (auto vceAttr = attr.dyn_cast<VerCapExtAttr>())
+  else if (auto vceAttr = llvm::dyn_cast<VerCapExtAttr>(attr))
     print(vceAttr, printer);
-  else if (auto interfaceVarABIAttr = attr.dyn_cast<InterfaceVarABIAttr>())
+  else if (auto interfaceVarABIAttr = llvm::dyn_cast<InterfaceVarABIAttr>(attr))
     print(interfaceVarABIAttr, printer);
   else
     llvm_unreachable("unhandled SPIR-V attribute kind");

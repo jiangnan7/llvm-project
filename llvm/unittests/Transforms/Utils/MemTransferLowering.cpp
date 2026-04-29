@@ -17,7 +17,6 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/InitializePasses.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/SourceMgr.h"
@@ -89,7 +88,7 @@ struct MemTransferLowerTest : public testing::Test {
 
     // A failure here means that the test itself is buggy.
     if (!M)
-      report_fatal_error(os.str().c_str());
+      report_fatal_error(errMsg.c_str());
   }
 };
 
@@ -199,9 +198,9 @@ TEST_F(MemTransferLowerTest, AtomicMemCpyKnownLength) {
         TargetTransformInfo TTI(M->getDataLayout());
         auto *MemCpyBB = getBasicBlockByName(F, "memcpy");
         Instruction *Inst = &MemCpyBB->front();
-        assert(isa<AtomicMemCpyInst>(Inst) &&
+        assert(isa<AnyMemCpyInst>(Inst) &&
                "Expecting llvm.memcpy.p0i8.i64 instructon");
-        AtomicMemCpyInst *MemCpyI = cast<AtomicMemCpyInst>(Inst);
+        AnyMemCpyInst *MemCpyI = cast<AnyMemCpyInst>(Inst);
         auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
         expandAtomicMemCpyAsLoop(MemCpyI, TTI, &SE);
         auto *CopyLoopBB = getBasicBlockByName(F, "load-store-loop");
@@ -244,9 +243,9 @@ TEST_F(MemTransferLowerTest, AtomicMemCpyUnKnownLength) {
         TargetTransformInfo TTI(M->getDataLayout());
         auto *MemCpyBB = getBasicBlockByName(F, "memcpy");
         Instruction *Inst = &MemCpyBB->front();
-        assert(isa<AtomicMemCpyInst>(Inst) &&
+        assert(isa<AnyMemCpyInst>(Inst) &&
                "Expecting llvm.memcpy.p0i8.i64 instructon");
-        AtomicMemCpyInst *MemCpyI = cast<AtomicMemCpyInst>(Inst);
+        auto *MemCpyI = cast<AnyMemCpyInst>(Inst);
         auto &SE = FAM.getResult<ScalarEvolutionAnalysis>(F);
         expandAtomicMemCpyAsLoop(MemCpyI, TTI, &SE);
         auto *CopyLoopBB = getBasicBlockByName(F, "loop-memcpy-expansion");

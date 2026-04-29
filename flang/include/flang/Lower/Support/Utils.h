@@ -14,17 +14,18 @@
 #define FORTRAN_LOWER_SUPPORT_UTILS_H
 
 #include "flang/Common/indirection.h"
+#include "flang/Lower/IterationSpace.h"
 #include "flang/Parser/char-block.h"
 #include "flang/Semantics/tools.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringRef.h"
-#include <cstdint>
 
 namespace Fortran::lower {
 using SomeExpr = Fortran::evaluate::Expr<Fortran::evaluate::SomeType>;
-}
+} // end namespace Fortran::lower
 
 //===----------------------------------------------------------------------===//
 // Small inline helper functions to deal with repetitive, clumsy conversions.
@@ -69,7 +70,8 @@ static Fortran::lower::SomeExpr ignoreEvConvert(const A &x) {
 inline Fortran::lower::SomeExpr
 ignoreEvConvert(const Fortran::evaluate::Expr<Fortran::evaluate::Type<
                     Fortran::common::TypeCategory::Integer, 8>> &x) {
-  return std::visit([](const auto &v) { return ignoreEvConvert(v); }, x.u);
+  return Fortran::common::visit(
+      [](const auto &v) { return ignoreEvConvert(v); }, x.u);
 }
 
 /// Zip two containers of the same size together and flatten the pairs. `flatZip
@@ -84,5 +86,44 @@ A flatZip(const A &container1, const A &container2) {
   }
   return result;
 }
+
+namespace Fortran::lower {
+unsigned getHashValue(const Fortran::lower::SomeExpr *x);
+unsigned getHashValue(const Fortran::lower::ExplicitIterSpace::ArrayBases &x);
+
+bool isEqual(const Fortran::lower::SomeExpr *x,
+             const Fortran::lower::SomeExpr *y);
+bool isEqual(const Fortran::lower::ExplicitIterSpace::ArrayBases &x,
+             const Fortran::lower::ExplicitIterSpace::ArrayBases &y);
+
+template <typename OpType, typename OperandsStructType>
+void privatizeSymbol(
+    lower::AbstractConverter &converter, fir::FirOpBuilder &firOpBuilder,
+    lower::SymMap &symTable,
+    llvm::SetVector<const semantics::Symbol *> &allPrivatizedSymbols,
+    llvm::SmallSet<const semantics::Symbol *, 16> &mightHaveReadHostSym,
+    const semantics::Symbol *symToPrivatize, OperandsStructType *clauseOps);
+
+} // end namespace Fortran::lower
+
+// DenseMapInfo for pointers to Fortran::lower::SomeExpr.
+namespace llvm {
+template <>
+struct DenseMapInfo<const Fortran::lower::SomeExpr *> {
+  static inline const Fortran::lower::SomeExpr *getEmptyKey() {
+    return reinterpret_cast<Fortran::lower::SomeExpr *>(~0);
+  }
+  static inline const Fortran::lower::SomeExpr *getTombstoneKey() {
+    return reinterpret_cast<Fortran::lower::SomeExpr *>(~0 - 1);
+  }
+  static unsigned getHashValue(const Fortran::lower::SomeExpr *v) {
+    return Fortran::lower::getHashValue(v);
+  }
+  static bool isEqual(const Fortran::lower::SomeExpr *lhs,
+                      const Fortran::lower::SomeExpr *rhs) {
+    return Fortran::lower::isEqual(lhs, rhs);
+  }
+};
+} // namespace llvm
 
 #endif // FORTRAN_LOWER_SUPPORT_UTILS_H

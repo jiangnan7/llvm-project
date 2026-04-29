@@ -5,8 +5,8 @@
 target triple = "x86_64-unknown-linux-gnu"
 
 ;.
-; CHECK: @[[SWITCH_TABLE_SWITCH_TO_LOOKUP_I64:[a-zA-Z0-9_$"\\.-]+]] = private unnamed_addr constant [3 x i8] c"\03\01\02", align 1
-; CHECK: @[[SWITCH_TABLE_SWITCH_TO_LOOKUP_I128:[a-zA-Z0-9_$"\\.-]+]] = private unnamed_addr constant [3 x i8] c"\03\01\02", align 1
+; CHECK: @switch.table.switch_to_lookup_i64 = private unnamed_addr constant [3 x i8] c"\03\01\02", align 1
+; CHECK: @switch.table.switch_to_lookup_i128 = private unnamed_addr constant [3 x i8] c"\03\01\02", align 1
 ;.
 define i8 @switch_to_lookup_i64(i64 %x){
 ; CHECK-LABEL: @switch_to_lookup_i64(
@@ -17,7 +17,7 @@ define i8 @switch_to_lookup_i64(i64 %x){
 ; CHECK-NEXT:    [[COMMON_RET_OP:%.*]] = phi i8 [ [[SWITCH_LOAD:%.*]], [[SWITCH_LOOKUP]] ], [ 10, [[START:%.*]] ]
 ; CHECK-NEXT:    ret i8 [[COMMON_RET_OP]]
 ; CHECK:       switch.lookup:
-; CHECK-NEXT:    [[SWITCH_GEP:%.*]] = getelementptr inbounds [3 x i8], ptr @switch.table.switch_to_lookup_i64, i32 0, i64 [[X]]
+; CHECK-NEXT:    [[SWITCH_GEP:%.*]] = getelementptr inbounds [3 x i8], ptr @switch.table.switch_to_lookup_i64, i64 0, i64 [[X]]
 ; CHECK-NEXT:    [[SWITCH_LOAD]] = load i8, ptr [[SWITCH_GEP]], align 1
 ; CHECK-NEXT:    br label [[COMMON_RET]]
 ;
@@ -25,7 +25,7 @@ define i8 @switch_to_lookup_i64(i64 %x){
 ; INLINE-NEXT:  start:
 ; INLINE-NEXT:    [[TMP0:%.*]] = icmp ult i64 [[X:%.*]], 3
 ; INLINE-NEXT:    [[SWITCH_CAST:%.*]] = trunc i64 [[X]] to i24
-; INLINE-NEXT:    [[SWITCH_SHIFTAMT:%.*]] = mul i24 [[SWITCH_CAST]], 8
+; INLINE-NEXT:    [[SWITCH_SHIFTAMT:%.*]] = mul nuw nsw i24 [[SWITCH_CAST]], 8
 ; INLINE-NEXT:    [[SWITCH_DOWNSHIFT:%.*]] = lshr i24 131331, [[SWITCH_SHIFTAMT]]
 ; INLINE-NEXT:    [[SWITCH_MASKED:%.*]] = trunc i24 [[SWITCH_DOWNSHIFT]] to i8
 ; INLINE-NEXT:    [[COMMON_RET_OP:%.*]] = select i1 [[TMP0]], i8 [[SWITCH_MASKED]], i8 10
@@ -61,7 +61,8 @@ define i8 @switch_to_lookup_i128(i128 %x){
 ; CHECK-NEXT:    [[COMMON_RET_OP:%.*]] = phi i8 [ [[SWITCH_LOAD:%.*]], [[SWITCH_LOOKUP]] ], [ 10, [[START:%.*]] ]
 ; CHECK-NEXT:    ret i8 [[COMMON_RET_OP]]
 ; CHECK:       switch.lookup:
-; CHECK-NEXT:    [[SWITCH_GEP:%.*]] = getelementptr inbounds [3 x i8], ptr @switch.table.switch_to_lookup_i128, i32 0, i128 [[X]]
+; CHECK-NEXT:    [[TMP1:%.*]] = trunc i128 [[X]] to i64
+; CHECK-NEXT:    [[SWITCH_GEP:%.*]] = getelementptr inbounds [3 x i8], ptr @switch.table.switch_to_lookup_i128, i64 0, i64 [[TMP1]]
 ; CHECK-NEXT:    [[SWITCH_LOAD]] = load i8, ptr [[SWITCH_GEP]], align 1
 ; CHECK-NEXT:    br label [[COMMON_RET]]
 ;
@@ -69,7 +70,7 @@ define i8 @switch_to_lookup_i128(i128 %x){
 ; INLINE-NEXT:  start:
 ; INLINE-NEXT:    [[TMP0:%.*]] = icmp ult i128 [[X:%.*]], 3
 ; INLINE-NEXT:    [[SWITCH_CAST:%.*]] = trunc i128 [[X]] to i24
-; INLINE-NEXT:    [[SWITCH_SHIFTAMT:%.*]] = mul i24 [[SWITCH_CAST]], 8
+; INLINE-NEXT:    [[SWITCH_SHIFTAMT:%.*]] = mul nuw nsw i24 [[SWITCH_CAST]], 8
 ; INLINE-NEXT:    [[SWITCH_DOWNSHIFT:%.*]] = lshr i24 131331, [[SWITCH_SHIFTAMT]]
 ; INLINE-NEXT:    [[SWITCH_MASKED:%.*]] = trunc i24 [[SWITCH_DOWNSHIFT]] to i8
 ; INLINE-NEXT:    [[COMMON_RET_OP:%.*]] = select i1 [[TMP0]], i8 [[SWITCH_MASKED]], i8 10

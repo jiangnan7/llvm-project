@@ -1,4 +1,5 @@
-! UNSUPPORTED: system-windows
+! Solaris ld doesn't support the linker plugin interface
+! UNSUPPORTED: system-windows, system-solaris
 ! RUN: %flang -### -S %s 2>&1 | FileCheck %s --check-prefix=NO-LTO
 ! RUN: %flang -### -S -fno-lto %s 2>&1 | FileCheck %s --check-prefix=NO-LTO
 
@@ -9,9 +10,14 @@
 ! RUN: %flang -### -S -flto=jobserver %s 2>&1 | FileCheck %s --check-prefix=FULL-LTO
 
 ! Also check linker plugin opt for Thin LTO
-! RUN: %flang -### -flto=thin %s 2>&1 | FileCheck %s --check-prefix=THIN-LTO
+! RUN: %flang -### -flto=thin %s 2>&1 | FileCheck %s \
+! RUN:        --check-prefixes=%if system-darwin || system-aix %{THIN-LTO-ALL%} \
+! RUN:        %else %{THIN-LTO-ALL,THIN-LTO-LINKER-PLUGIN%}
 
-! RUN: %flang -### -S -flto=somelto %s 2>&1 | FileCheck %s --check-prefix=ERROR
+! RUN: %flang -### -flto=thin --target=powerpc64-aix %s 2>&1 | FileCheck %s \
+! RUN:        --check-prefix THIN-LTO-LINKER-AIX
+
+! RUN: not %flang -### -S -flto=somelto %s 2>&1 | FileCheck %s --check-prefix=ERROR
 
 ! FC1 tests. Check that it does not crash.
 ! RUN: %flang_fc1 -S %s -flto -o /dev/null
@@ -24,9 +30,10 @@
 ! FULL-LTO: "-fc1"
 ! FULL-LTO-SAME: "-flto=full"
 
-! THIN-LTO: flang-new: warning: the option '-flto=thin' is a work in progress
-! THIN-LTO: "-fc1"
-! THIN-LTO-SAME: "-flto=thin"
-! THIN-LTO: "-plugin-opt=thinlto"
+! THIN-LTO-ALL: flang{{.*}}: warning: the option '-flto=thin' is a work in progress
+! THIN-LTO-ALL: "-fc1"
+! THIN-LTO-ALL-SAME: "-flto=thin"
+! THIN-LTO-LINKER-PLUGIN: "-plugin-opt=thinlto"
+! THIN-LTO-LINKER-AIX: "-bdbg:thinlto"
 
 ! ERROR: error: unsupported argument 'somelto' to option '-flto=

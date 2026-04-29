@@ -3,7 +3,6 @@ add_llvm_component_library(LLVMLTO
   LTOBackend.cpp
   LTOModule.cpp
   LTOCodeGenerator.cpp
-  SummaryBasedOptimizations.cpp
   UpdateCompilerUsed.cpp
   ThinLTOCodeGenerator.cpp
 
@@ -13,13 +12,18 @@ add_llvm_component_library(LLVMLTO
   intrinsics_gen
   llvm_vcsrevision_h
 
+  LINK_LIBS
+  ${LLVM_PTHREAD_LIB}
+
   LINK_COMPONENTS
   AggressiveInstCombine
   Analysis
   BinaryFormat
   BitReader
   BitWriter
+  CGData
   CodeGen
+  CodeGenTypes
   Core
   Extensions
   IPO
@@ -36,4 +40,4 @@ add_llvm_component_library(LLVMLTO
   Target
   TargetParser
   TransformUtils
-)
+  )

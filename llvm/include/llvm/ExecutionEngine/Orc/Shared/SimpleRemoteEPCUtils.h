@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h"
 #include "llvm/ExecutionEngine/Orc/Shared/SimplePackedSerialization.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Error.h"
 
 #include <atomic>
@@ -30,8 +31,8 @@ namespace llvm {
 namespace orc {
 
 namespace SimpleRemoteEPCDefaultBootstrapSymbolNames {
-extern const char *ExecutorSessionObjectName;
-extern const char *DispatchFnName;
+LLVM_ABI extern const char *ExecutorSessionObjectName;
+LLVM_ABI extern const char *DispatchFnName;
 } // end namespace SimpleRemoteEPCDefaultBootstrapSymbolNames
 
 enum class SimpleRemoteEPCOpcode : uint8_t {
@@ -45,12 +46,13 @@ enum class SimpleRemoteEPCOpcode : uint8_t {
 struct SimpleRemoteEPCExecutorInfo {
   std::string TargetTriple;
   uint64_t PageSize;
+  StringMap<std::vector<char>> BootstrapMap;
   StringMap<ExecutorAddr> BootstrapSymbols;
 };
 
 using SimpleRemoteEPCArgBytesVector = SmallVector<char, 128>;
 
-class SimpleRemoteEPCTransportClient {
+class LLVM_ABI SimpleRemoteEPCTransportClient {
 public:
   enum HandleMessageAction { ContinueSession, EndSession };
 
@@ -74,7 +76,7 @@ public:
   virtual void handleDisconnect(Error Err) = 0;
 };
 
-class SimpleRemoteEPCTransport {
+class LLVM_ABI SimpleRemoteEPCTransport {
 public:
   virtual ~SimpleRemoteEPCTransport();
 
@@ -99,7 +101,7 @@ public:
 };
 
 /// Uses read/write on FileDescriptors for transport.
-class FDSimpleRemoteEPCTransport : public SimpleRemoteEPCTransport {
+class LLVM_ABI FDSimpleRemoteEPCTransport : public SimpleRemoteEPCTransport {
 public:
   /// Create a FDSimpleRemoteEPCTransport using the given FDs for
   /// reading (InFD) and writing (OutFD).
@@ -161,6 +163,7 @@ using SPSRemoteSymbolLookup = SPSTuple<uint64_t, SPSRemoteSymbolLookupSet>;
 /// Tuple containing target triple, page size, and bootstrap symbols.
 using SPSSimpleRemoteEPCExecutorInfo =
     SPSTuple<SPSString, uint64_t,
+             SPSSequence<SPSTuple<SPSString, SPSSequence<char>>>,
              SPSSequence<SPSTuple<SPSString, SPSExecutorAddr>>>;
 
 template <>
@@ -206,18 +209,18 @@ class SPSSerializationTraits<SPSSimpleRemoteEPCExecutorInfo,
 public:
   static size_t size(const SimpleRemoteEPCExecutorInfo &SI) {
     return SPSSimpleRemoteEPCExecutorInfo::AsArgList ::size(
-        SI.TargetTriple, SI.PageSize, SI.BootstrapSymbols);
+        SI.TargetTriple, SI.PageSize, SI.BootstrapMap, SI.BootstrapSymbols);
   }
 
   static bool serialize(SPSOutputBuffer &OB,
                         const SimpleRemoteEPCExecutorInfo &SI) {
     return SPSSimpleRemoteEPCExecutorInfo::AsArgList ::serialize(
-        OB, SI.TargetTriple, SI.PageSize, SI.BootstrapSymbols);
+        OB, SI.TargetTriple, SI.PageSize, SI.BootstrapMap, SI.BootstrapSymbols);
   }
 
   static bool deserialize(SPSInputBuffer &IB, SimpleRemoteEPCExecutorInfo &SI) {
     return SPSSimpleRemoteEPCExecutorInfo::AsArgList ::deserialize(
-        IB, SI.TargetTriple, SI.PageSize, SI.BootstrapSymbols);
+        IB, SI.TargetTriple, SI.PageSize, SI.BootstrapMap, SI.BootstrapSymbols);
   }
 };
 

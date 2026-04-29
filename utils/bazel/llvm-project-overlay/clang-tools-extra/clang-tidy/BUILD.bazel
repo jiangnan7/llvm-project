@@ -57,7 +57,7 @@ genrule(
     srcs = ["misc/ConfusableTable/confusables.txt"],
     outs = ["Confusables.inc"],
     cmd = "$(location :confusable_table_builder) $(SRCS) $(OUTS)",
-    exec_tools = [":confusable_table_builder"],
+    tools = [":confusable_table_builder"],
     visibility = ["//visibility:private"],
 )
 
@@ -79,6 +79,7 @@ clang_tidy_library(
         "//clang:rewrite",
         "//clang:sema",
         "//clang:serialization",
+        "//clang:static_analyzer_checkers_gen",
         "//clang:tooling",
         "//clang:tooling_core",
     ] + select({
@@ -97,8 +98,12 @@ clang_tidy_library(
         ":lib",
         ":utils",
         "//clang:analysis",
+        "//clang:format",
         "//clang:serialization",
         "//clang:tooling",
+        "//clang:tooling_core",
+        "//clang:tooling_inclusions",
+        "//clang-tools-extra/include-cleaner:include_cleaner",
     ],
 )
 
@@ -114,6 +119,7 @@ clang_tidy_library(
     name = "utils",
     deps = [
         ":lib",
+        "//clang:analysis",
         "//clang:sema",
         "//clang:tooling",
         "//clang:transformer",
@@ -135,6 +141,7 @@ clang_tidy_library(
     deps = [
         ":lib",
         ":readability",
+        ":utils",
     ],
 )
 
@@ -190,7 +197,10 @@ clang_tidy_library(
 
 clang_tidy_library(
     name = "boost",
-    deps = [":lib"],
+    deps = [
+        ":lib",
+        ":utils",
+    ],
 )
 
 clang_tidy_library(
@@ -221,6 +231,7 @@ clang_tidy_library(
     name = "mpi",
     deps = [
         ":lib",
+        "//clang:static_analyzer_checkers",
         "//clang:static_analyzer_core",
         "//clang:static_analyzer_frontend",
         "//clang:tooling",
@@ -254,21 +265,24 @@ clang_tidy_library(
 clang_tidy_library(
     name = "cppcoreguidelines",
     deps = [
+        ":bugprone",
         ":lib",
         ":misc",
         ":modernize",
+        ":performance",
         ":readability",
         ":utils",
+        "//clang:analysis",
     ],
 )
 
 clang_tidy_library(
     name = "bugprone",
     deps = [
-        ":cppcoreguidelines",
         ":lib",
         ":utils",
         "//clang:analysis",
+        "//clang:sema",
         "//clang:tooling",
         "//clang:transformer",
     ],
@@ -355,6 +369,7 @@ cc_library(
         ":utils",
         "//clang:tooling",
         "//llvm:Support",
+        "//llvm:TargetParser",
     ],
 )
 

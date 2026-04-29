@@ -20,13 +20,13 @@
 
 /// Return all ancestor module and submodule scope names; all host procedure
 /// and statement function scope names; and the innermost blockId containing
-/// \p symbol.
+/// \p scope, including scope itself.
 static std::tuple<llvm::SmallVector<llvm::StringRef>,
                   llvm::SmallVector<llvm::StringRef>, std::int64_t>
-ancestors(const Fortran::semantics::Symbol &symbol,
+ancestors(const Fortran::semantics::Scope &scope,
           Fortran::lower::mangle::ScopeBlockIdMap &scopeBlockIdMap) {
   llvm::SmallVector<const Fortran::semantics::Scope *> scopes;
-  for (auto *scp = &symbol.owner(); !scp->IsGlobal(); scp = &scp->parent())
+  for (auto *scp = &scope; !scp->IsGlobal(); scp = &scp->parent())
     scopes.push_back(scp);
   llvm::SmallVector<llvm::StringRef> modules;
   llvm::SmallVector<llvm::StringRef> procs;
@@ -60,11 +60,32 @@ ancestors(const Fortran::semantics::Symbol &symbol,
   return {modules, procs, blockId};
 }
 
-// Mangle the name of \p symbol to make it globally unique.
+/// Return all ancestor module and submodule scope names; all host procedure
+/// and statement function scope names; and the innermost blockId containing
+/// \p symbol.
+static std::tuple<llvm::SmallVector<llvm::StringRef>,
+                  llvm::SmallVector<llvm::StringRef>, std::int64_t>
+ancestors(const Fortran::semantics::Symbol &symbol,
+          Fortran::lower::mangle::ScopeBlockIdMap &scopeBlockIdMap) {
+  return ancestors(symbol.owner(), scopeBlockIdMap);
+}
+
+/// Return a globally unique string for a compiler generated \p name.
 std::string
-Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
-                                   ScopeBlockIdMap &scopeBlockIdMap,
-                                   bool keepExternalInScope) {
+Fortran::lower::mangle::mangleName(std::string &name,
+                                   const Fortran::semantics::Scope &scope,
+                                   ScopeBlockIdMap &scopeBlockIdMap) {
+  llvm::SmallVector<llvm::StringRef> modules;
+  llvm::SmallVector<llvm::StringRef> procs;
+  std::int64_t blockId;
+  std::tie(modules, procs, blockId) = ancestors(scope, scopeBlockIdMap);
+  return fir::NameUniquer::doGenerated(modules, procs, blockId, name);
+}
+
+// Mangle the name of \p symbol to make it globally unique.
+std::string Fortran::lower::mangle::mangleName(
+    const Fortran::semantics::Symbol &symbol, ScopeBlockIdMap &scopeBlockIdMap,
+    bool keepExternalInScope, bool underscoring) {
   // Resolve module and host associations before mangling.
   const auto &ultimateSymbol = symbol.GetUltimate();
 
@@ -74,14 +95,6 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
   // coexist. The BIND(C) name is unique.
   if (auto *overrideName = ultimateSymbol.GetBindName())
     return *overrideName;
-
-  // TODO: A procedure that inherits BIND(C) through another interface
-  // (procedure(iface)) should be dealt with in GetBindName() or some wrapper.
-  if (!Fortran::semantics::IsPointer(ultimateSymbol) &&
-      Fortran::semantics::IsBindCProcedure(ultimateSymbol) &&
-      Fortran::semantics::ClassifyProcedure(symbol) !=
-          Fortran::semantics::ProcedureDefinitionClass::Internal)
-    return ultimateSymbol.name().ToString();
 
   llvm::StringRef symbolName = toStringRef(ultimateSymbol.name());
   llvm::SmallVector<llvm::StringRef> modules;
@@ -97,7 +110,7 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
     return fir::NameUniquer::doVariable(modules, procs, blockId, symbolName);
   };
 
-  return std::visit(
+  return Fortran::common::visit(
       Fortran::common::visitors{
           [&](const Fortran::semantics::MainProgramDetails &) {
             return fir::NameUniquer::doProgramEntry().str();
@@ -106,17 +119,15 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
             // Mangle external procedure without any scope prefix.
             if (!keepExternalInScope &&
                 Fortran::semantics::IsExternal(ultimateSymbol))
-              return fir::NameUniquer::doProcedure(std::nullopt, std::nullopt,
-                                                   symbolName);
+              return fir::NameUniquer::doProcedure({}, {}, symbolName);
             // A separate module procedure must be mangled according to its
             // declaration scope, not its definition scope.
             const Fortran::semantics::Symbol *interface = &ultimateSymbol;
             if (interface->attrs().test(Fortran::semantics::Attr::MODULE) &&
                 interface->owner().IsSubmodule() && !subpDetails.isInterface())
               interface = subpDetails.moduleInterface();
-            assert(interface && "Separate module procedure must be declared");
-            std::tie(modules, procs, blockId) =
-                ancestors(*interface, scopeBlockIdMap);
+            std::tie(modules, procs, blockId) = ancestors(
+                interface ? *interface : ultimateSymbol, scopeBlockIdMap);
             return fir::NameUniquer::doProcedure(modules, procs, symbolName);
           },
           [&](const Fortran::semantics::ProcEntityDetails &) {
@@ -130,8 +141,7 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
             }
             // Otherwise, this is an external procedure, with or without an
             // explicit EXTERNAL attribute. Mangle it without any prefix.
-            return fir::NameUniquer::doProcedure(std::nullopt, std::nullopt,
-                                                 symbolName);
+            return fir::NameUniquer::doProcedure({}, {}, symbolName);
           },
           [&](const Fortran::semantics::ObjectEntityDetails &) {
             return mangleObject();
@@ -146,11 +156,22 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
                                                      symbolName);
           },
           [&](const Fortran::semantics::CommonBlockDetails &) {
-            return fir::NameUniquer::doCommonBlock(symbolName);
+            return Fortran::semantics::GetCommonBlockObjectName(ultimateSymbol,
+                                                                underscoring);
           },
           [&](const Fortran::semantics::ProcBindingDetails &procBinding) {
             return mangleName(procBinding.symbol(), scopeBlockIdMap,
-                              keepExternalInScope);
+                              keepExternalInScope, underscoring);
+          },
+          [&](const Fortran::semantics::GenericDetails &generic)
+              -> std::string {
+            if (generic.specific())
+              return mangleName(*generic.specific(), scopeBlockIdMap,
+                                keepExternalInScope, underscoring);
+            else
+              llvm::report_fatal_error(
+                  "attempt to mangle a generic name but "
+                  "it has no specific procedure of the same name");
           },
           [&](const Fortran::semantics::DerivedTypeDetails &) -> std::string {
             // Derived type mangling must use mangleName(DerivedTypeSpec) so
@@ -165,12 +186,15 @@ Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
 
 std::string
 Fortran::lower::mangle::mangleName(const Fortran::semantics::Symbol &symbol,
-                                   bool keepExternalInScope) {
-  assert(symbol.owner().kind() !=
-             Fortran::semantics::Scope::Kind::BlockConstruct &&
+                                   bool keepExternalInScope,
+                                   bool underscoring) {
+  assert((symbol.owner().kind() !=
+              Fortran::semantics::Scope::Kind::BlockConstruct ||
+          symbol.has<Fortran::semantics::SubprogramDetails>() ||
+          Fortran::semantics::IsBindCProcedure(symbol)) &&
          "block object mangling must specify a scopeBlockIdMap");
   ScopeBlockIdMap scopeBlockIdMap;
-  return mangleName(symbol, scopeBlockIdMap, keepExternalInScope);
+  return mangleName(symbol, scopeBlockIdMap, keepExternalInScope, underscoring);
 }
 
 std::string Fortran::lower::mangle::mangleName(
@@ -200,11 +224,40 @@ std::string Fortran::lower::mangle::mangleName(
       assert(paramExpr && "derived type kind param not explicit");
       std::optional<int64_t> init =
           Fortran::evaluate::ToInt64(paramValue->GetExplicit());
-      assert(init && "derived type kind param is not constant");
-      kinds.emplace_back(*init);
+      // TODO: put the assertion check back when parametrized derived types
+      // are supported:
+      // assert(init && "derived type kind param is not constant");
+      //
+      // The init parameter above will require a FoldingContext for proper
+      // expression evaluation to an integer constant, otherwise the
+      // compiler may crash here (see example in issue #127424).
+      if (!init) {
+        TODO_NOLOC("parameterized derived types");
+      } else {
+        kinds.emplace_back(*init);
+      }
     }
   }
   return fir::NameUniquer::doType(modules, procs, blockId, symbolName, kinds);
+}
+
+std::string Fortran::lower::mangle::getRecordTypeFieldName(
+    const Fortran::semantics::Symbol &component,
+    ScopeBlockIdMap &scopeBlockIdMap) {
+  if (!component.attrs().test(Fortran::semantics::Attr::PRIVATE))
+    return component.name().ToString();
+  const Fortran::semantics::DerivedTypeSpec *componentParentType =
+      component.owner().derivedTypeSpec();
+  assert(componentParentType &&
+         "failed to retrieve private component parent type");
+  // Do not mangle Iso C C_PTR and C_FUNPTR components. This type cannot be
+  // extended as per Fortran 2018 7.5.7.1, mangling them makes the IR unreadable
+  // when using ISO C modules, and lowering needs to know the component way
+  // without access to semantics::Symbol.
+  if (Fortran::semantics::IsIsoCType(componentParentType))
+    return component.name().ToString();
+  return mangleName(*componentParentType, scopeBlockIdMap) + "." +
+         component.name().ToString();
 }
 
 std::string Fortran::lower::mangle::demangleName(llvm::StringRef name) {
@@ -221,6 +274,8 @@ static std::string typeToString(Fortran::common::TypeCategory cat, int kind,
   switch (cat) {
   case Fortran::common::TypeCategory::Integer:
     return "i" + std::to_string(kind);
+  case Fortran::common::TypeCategory::Unsigned:
+    return "u" + std::to_string(kind);
   case Fortran::common::TypeCategory::Real:
     return "r" + std::to_string(kind);
   case Fortran::common::TypeCategory::Complex:
@@ -236,8 +291,7 @@ static std::string typeToString(Fortran::common::TypeCategory cat, int kind,
 }
 
 std::string Fortran::lower::mangle::mangleArrayLiteral(
-    const uint8_t *addr, size_t size,
-    const Fortran::evaluate::ConstantSubscripts &shape,
+    size_t size, const Fortran::evaluate::ConstantSubscripts &shape,
     Fortran::common::TypeCategory cat, int kind,
     Fortran::common::ConstantSubscript charLen, llvm::StringRef derivedName) {
   std::string typeId;
@@ -249,18 +303,12 @@ std::string Fortran::lower::mangle::mangleArrayLiteral(
   std::string name =
       fir::NameUniquer::doGenerated("ro."s.append(typeId).append("."));
   if (!size)
-    return name += "null";
-  llvm::MD5 hashValue{};
-  hashValue.update(llvm::ArrayRef<uint8_t>{addr, size});
-  llvm::MD5::MD5Result hashResult;
-  hashValue.final(hashResult);
-  llvm::SmallString<32> hashString;
-  llvm::MD5::stringifyResult(hashResult, hashString);
-  return name += hashString.c_str();
+    name += "null.";
+  return name;
 }
 
 std::string Fortran::lower::mangle::globalNamelistDescriptorName(
     const Fortran::semantics::Symbol &sym) {
   std::string name = mangleName(sym);
-  return IsAllocatableOrPointer(sym) ? name : name + ".desc"s;
+  return IsAllocatableOrObjectPointer(&sym) ? name : name + ".desc"s;
 }

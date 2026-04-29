@@ -7,7 +7,7 @@
 
 #include "Inputs/cuda.h"
 
-// CHECK-LABEL: @_Z8test_argPu6__bf16u6__bf16(
+// CHECK-LABEL: @_Z8test_argPDF16bDF16b(
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[OUT_ADDR:%.*]] = alloca ptr, align 8, addrspace(5)
 // CHECK-NEXT:    [[IN_ADDR:%.*]] = alloca bfloat, align 2, addrspace(5)
@@ -29,7 +29,7 @@ __device__ void test_arg(__bf16 *out, __bf16 in) {
   *out = bf16;
 }
 
-// CHECK-LABEL: @_Z9test_loadPu6__bf16S_(
+// CHECK-LABEL: @_Z9test_loadPDF16bS_(
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[OUT_ADDR:%.*]] = alloca ptr, align 8, addrspace(5)
 // CHECK-NEXT:    [[IN_ADDR:%.*]] = alloca ptr, align 8, addrspace(5)
@@ -52,7 +52,7 @@ __device__ void test_load(__bf16 *out, __bf16 *in) {
   *out = bf16;
 }
 
-// CHECK-LABEL: @_Z8test_retu6__bf16(
+// CHECK-LABEL: @_Z8test_retDF16b(
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[RETVAL:%.*]] = alloca bfloat, align 2, addrspace(5)
 // CHECK-NEXT:    [[IN_ADDR:%.*]] = alloca bfloat, align 2, addrspace(5)
@@ -66,7 +66,7 @@ __device__ __bf16 test_ret( __bf16 in) {
   return in;
 }
 
-// CHECK-LABEL: @_Z9test_callu6__bf16(
+// CHECK-LABEL: @_Z9test_callDF16b(
 // CHECK-NEXT:  entry:
 // CHECK-NEXT:    [[RETVAL:%.*]] = alloca bfloat, align 2, addrspace(5)
 // CHECK-NEXT:    [[IN_ADDR:%.*]] = alloca bfloat, align 2, addrspace(5)
@@ -74,7 +74,7 @@ __device__ __bf16 test_ret( __bf16 in) {
 // CHECK-NEXT:    [[IN_ADDR_ASCAST:%.*]] = addrspacecast ptr addrspace(5) [[IN_ADDR]] to ptr
 // CHECK-NEXT:    store bfloat [[IN:%.*]], ptr [[IN_ADDR_ASCAST]], align 2
 // CHECK-NEXT:    [[TMP0:%.*]] = load bfloat, ptr [[IN_ADDR_ASCAST]], align 2
-// CHECK-NEXT:    [[CALL:%.*]] = call contract noundef bfloat @_Z8test_retu6__bf16(bfloat noundef [[TMP0]]) #[[ATTR1:[0-9]+]]
+// CHECK-NEXT:    [[CALL:%.*]] = call contract noundef bfloat @_Z8test_retDF16b(bfloat noundef [[TMP0]]) #[[ATTR1:[0-9]+]]
 // CHECK-NEXT:    ret bfloat [[CALL]]
 //
 __device__ __bf16 test_call( __bf16 in) {
@@ -111,19 +111,15 @@ __device__ __bf16 test_call( __bf16 in) {
 // CHECK-NEXT:    ret void
 //
 __device__ void test_vec_assign() {
-  typedef __attribute__((ext_vector_type(2))) __bf16 bf16_x2;
-  bf16_x2 vec2_a, vec2_b;
+  __bf16 [[clang::ext_vector_type(2)]] vec2_a, vec2_b;
   vec2_a = vec2_b;
 
-  typedef __attribute__((ext_vector_type(4))) __bf16 bf16_x4;
-  bf16_x4 vec4_a, vec4_b;
+  __bf16 __attribute__((ext_vector_type(4))) vec4_a, vec4_b;
   vec4_a = vec4_b;
 
-  typedef __attribute__((ext_vector_type(8))) __bf16 bf16_x8;
-  bf16_x8 vec8_a, vec8_b;
+  __bf16 [[clang::ext_vector_type(8)]] vec8_a, vec8_b;
   vec8_a = vec8_b;
 
-  typedef __attribute__((ext_vector_type(16))) __bf16 bf16_x16;
-  bf16_x16 vec16_a, vec16_b;
+  __bf16 __attribute__((ext_vector_type(16))) vec16_a, vec16_b;
   vec16_a = vec16_b;
 }

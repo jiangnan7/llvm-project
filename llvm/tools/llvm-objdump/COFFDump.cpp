@@ -37,13 +37,15 @@ template <typename T> struct EnumEntry {
   StringRef Name;
 };
 
-class COFFDumper {
+class COFFDumper : public Dumper {
 public:
-  explicit COFFDumper(const llvm::object::COFFObjectFile &Obj) : Obj(Obj) {
+  explicit COFFDumper(const llvm::object::COFFObjectFile &O)
+      : Dumper(O), Obj(O) {
     Is64 = !Obj.getPE32Header();
   }
 
   template <class PEHeader> void printPEHeader(const PEHeader &Hdr) const;
+  void printPrivateHeaders() override;
 
 private:
   template <typename T> FormattedNumber formatAddr(T V) const {
@@ -58,6 +60,11 @@ private:
   bool Is64;
 };
 } // namespace
+
+std::unique_ptr<Dumper>
+objdump::createCOFFDumper(const object::COFFObjectFile &Obj) {
+  return std::make_unique<COFFDumper>(Obj);
+}
 
 constexpr EnumEntry<uint16_t> PEHeaderMagic[] = {
     {uint16_t(COFF::PE32Header::PE32), "PE32"},
@@ -233,10 +240,10 @@ static unsigned getNumUsedSlots(const UnwindCode &UnwindCode) {
   case UOP_AllocSmall:
   case UOP_SetFPReg:
   case UOP_PushMachFrame:
+  case UOP_Epilog:
     return 1;
   case UOP_SaveNonVol:
   case UOP_SaveXMM128:
-  case UOP_Epilog:
     return 2;
   case UOP_SaveNonVolBig:
   case UOP_SaveXMM128Big:
@@ -250,7 +257,7 @@ static unsigned getNumUsedSlots(const UnwindCode &UnwindCode) {
 // Prints one unwind code. Because an unwind code can occupy up to 3 slots in
 // the unwind codes array, this function requires that the correct number of
 // slots is provided.
-static void printUnwindCode(ArrayRef<UnwindCode> UCs) {
+static void printUnwindCode(ArrayRef<UnwindCode> UCs, bool &SeenFirstEpilog) {
   assert(UCs.size() >= getNumUsedSlots(UCs[0]));
   outs() <<  format("      0x%02x: ", unsigned(UCs[0].u.CodeOffset))
          << getUnwindCodeTypeName(UCs[0].getUnwindOp());
@@ -294,11 +301,29 @@ static void printUnwindCode(ArrayRef<UnwindCode> UCs) {
     outs() << " " << (UCs[0].getOpInfo() ? "w/o" : "w")
            << " error code";
     break;
+
+  case UOP_Epilog:
+    if (SeenFirstEpilog) {
+      uint32_t Offset = UCs[0].getEpilogOffset();
+      if (Offset == 0) {
+        outs() << " padding";
+      } else {
+        outs() << " offset=" << format("0x%X", Offset);
+      }
+    } else {
+      SeenFirstEpilog = true;
+      bool AtEnd = (UCs[0].getOpInfo() & 0x1) != 0;
+      uint32_t Length = UCs[0].u.CodeOffset;
+      outs() << " atend=" << (AtEnd ? "yes" : "no")
+             << ", length=" << format("0x%X", Length);
+    }
+    break;
   }
   outs() << "\n";
 }
 
 static void printAllUnwindCodes(ArrayRef<UnwindCode> UCs) {
+  bool SeenFirstEpilog = false;
   for (const UnwindCode *I = UCs.begin(), *E = UCs.end(); I < E; ) {
     unsigned UsedSlots = getNumUsedSlots(*I);
     if (UsedSlots > UCs.size()) {
@@ -309,7 +334,7 @@ static void printAllUnwindCodes(ArrayRef<UnwindCode> UCs) {
              << " remaining in buffer";
       return ;
     }
-    printUnwindCode(ArrayRef(I, E));
+    printUnwindCode(ArrayRef(I, E), SeenFirstEpilog);
     I += UsedSlots;
   }
 }
@@ -545,11 +570,17 @@ static void printExportTable(const COFFObjectFile *Obj) {
   outs() << " Ordinal base: " << OrdinalBase << "\n";
   outs() << " Ordinal      RVA  Name\n";
   for (; I != E; I = ++I) {
-    uint32_t Ordinal;
-    if (I->getOrdinal(Ordinal))
-      return;
     uint32_t RVA;
     if (I->getExportRVA(RVA))
+      return;
+    StringRef Name;
+    if (I->getSymbolName(Name))
+      continue;
+    if (!RVA && Name.empty())
+      continue;
+
+    uint32_t Ordinal;
+    if (I->getOrdinal(Ordinal))
       return;
     bool IsForwarder;
     if (I->isForwarder(IsForwarder))
@@ -559,14 +590,11 @@ static void printExportTable(const COFFObjectFile *Obj) {
       // Export table entries can be used to re-export symbols that
       // this COFF file is imported from some DLLs. This is rare.
       // In most cases IsForwarder is false.
-      outs() << format("    % 4d         ", Ordinal);
+      outs() << format("   %5d         ", Ordinal);
     } else {
-      outs() << format("    % 4d %# 8x", Ordinal, RVA);
+      outs() << format("   %5d %# 8x", Ordinal, RVA);
     }
 
-    StringRef Name;
-    if (I->getSymbolName(Name))
-      continue;
     if (!Name.empty())
       outs() << "  " << Name;
     if (IsForwarder) {
@@ -761,7 +789,7 @@ void objdump::printCOFFUnwindInfo(const COFFObjectFile *Obj) {
   }
 }
 
-void objdump::printCOFFFileHeader(const COFFObjectFile &Obj) {
+void COFFDumper::printPrivateHeaders() {
   COFFDumper CD(Obj);
   const uint16_t Cha = Obj.getCharacteristics();
   outs() << "Characteristics 0x" << Twine::utohexstr(Cha) << '\n';
@@ -847,10 +875,9 @@ void objdump::printCOFFSymbolTable(const COFFObjectFile &coff) {
            << "(nx " << unsigned(Symbol->getNumberOfAuxSymbols()) << ") "
            << "0x" << format("%08x", unsigned(Symbol->getValue())) << " "
            << Name;
-    if (Demangle && Name.startswith("?")) {
+    if (Demangle && Name.starts_with("?")) {
       int Status = -1;
-      char *DemangledSymbol =
-          microsoftDemangle(Name.data(), nullptr, nullptr, nullptr, &Status);
+      char *DemangledSymbol = microsoftDemangle(Name, nullptr, &Status);
 
       if (Status == 0 && DemangledSymbol) {
         outs() << " (" << StringRef(DemangledSymbol) << ")";

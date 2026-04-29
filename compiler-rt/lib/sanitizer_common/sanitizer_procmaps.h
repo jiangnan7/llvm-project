@@ -16,7 +16,7 @@
 #include "sanitizer_platform.h"
 
 #if SANITIZER_LINUX || SANITIZER_FREEBSD || SANITIZER_NETBSD || \
-    SANITIZER_APPLE || SANITIZER_SOLARIS ||  \
+    SANITIZER_APPLE || SANITIZER_SOLARIS || SANITIZER_HAIKU ||  \
     SANITIZER_FUCHSIA
 
 #include "sanitizer_common.h"
@@ -84,10 +84,14 @@ class MemoryMappingLayout : public MemoryMappingLayoutBase {
 // This destructor cannot be virtual, as it would cause an operator new() linking
 // failures in hwasan test cases. However non-virtual destructors emit warnings
 // in macOS build, hence disabling those
+#ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnon-virtual-dtor"
+#endif
   ~MemoryMappingLayout();
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
   virtual bool Next(MemoryMappedSegment *segment) override;
   virtual bool Error() const override;

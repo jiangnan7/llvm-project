@@ -2,7 +2,7 @@
 ! Lowering must close the eyes and do as if it did not know
 ! about the function definition since semantic lets these
 ! programs through with a warning.
-! RUN: bbc -emit-fir -hlfir %s -o - | FileCheck %s
+! RUN: bbc -emit-hlfir %s -o - | FileCheck %s
 
 subroutine takes_char(c)
   character(8) :: c
@@ -16,7 +16,7 @@ end subroutine
 ! CHECK:  %[[VAL_1:.*]]:2 = hlfir.declare {{.*}}Er
 ! CHECK:  %[[VAL_2:.*]] = fir.address_of(@_QPtakes_char) : (!fir.boxchar<1>) -> ()
 ! CHECK:  %[[VAL_3:.*]] = fir.convert %[[VAL_2]] : ((!fir.boxchar<1>) -> ()) -> ((!fir.ref<f64>) -> ())
-! CHECK:  fir.call %[[VAL_3]](%[[VAL_1]]#1) {{.*}}: (!fir.ref<f64>) -> ()
+! CHECK:  fir.call %[[VAL_3]](%[[VAL_1]]#0) {{.*}}: (!fir.ref<f64>) -> ()
 
 subroutine pass_char_proc_to_char()
   character(8), external :: char_proc
@@ -37,10 +37,11 @@ subroutine pass_kind2_char_to_char(c)
   call takes_char(c)
 end subroutine
 ! CHECK-LABEL: func.func @_QPpass_kind2_char_to_char(
-! CHECK:  %[[VAL_3:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_2:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_3:.*]] = fir.emboxchar %[[VAL_2]]#0, %{{.*}} : (!fir.ref<!fir.char<2,4>>, index) -> !fir.boxchar<2>
 ! CHECK:  %[[VAL_4:.*]] = fir.address_of(@_QPtakes_char) : (!fir.boxchar<1>) -> ()
 ! CHECK:  %[[VAL_5:.*]] = fir.convert %[[VAL_4]] : ((!fir.boxchar<1>) -> ()) -> ((!fir.boxchar<2>) -> ())
-! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]#0) {{.*}}: (!fir.boxchar<2>) -> ()
+! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]) {{.*}}: (!fir.boxchar<2>) -> ()
 
 subroutine takes_real(r)
   real(8) :: r
@@ -52,7 +53,7 @@ subroutine pass_int_to_real(i)
 end subroutine
 ! CHECK-LABEL: func.func @_QPpass_int_to_real(
 ! CHECK:  %[[VAL_1:.*]]:2 = hlfir.declare {{.*}}Ei
-! CHECK:  %[[VAL_2:.*]] = fir.convert %[[VAL_1]]#1 : (!fir.ref<i64>) -> !fir.ref<f64>
+! CHECK:  %[[VAL_2:.*]] = fir.convert %[[VAL_1]]#0 : (!fir.ref<i64>) -> !fir.ref<f64>
 ! CHECK:  fir.call @_QPtakes_real(%[[VAL_2]]) {{.*}}: (!fir.ref<f64>) -> ()
 
 subroutine pass_char_to_real(c)
@@ -60,10 +61,11 @@ subroutine pass_char_to_real(c)
   call takes_real(c)
 end subroutine
 ! CHECK-LABEL: func.func @_QPpass_char_to_real(
-! CHECK:  %[[VAL_3:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_2:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_3:.*]] = fir.emboxchar %[[VAL_2]]#0, %{{.*}} : (!fir.ref<!fir.char<1,8>>, index) -> !fir.boxchar<1>
 ! CHECK:  %[[VAL_4:.*]] = fir.address_of(@_QPtakes_real) : (!fir.ref<f64>) -> ()
 ! CHECK:  %[[VAL_5:.*]] = fir.convert %[[VAL_4]] : ((!fir.ref<f64>) -> ()) -> ((!fir.boxchar<1>) -> ())
-! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]#0) {{.*}}: (!fir.boxchar<1>) -> ()
+! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]) {{.*}}: (!fir.boxchar<1>) -> ()
 
 subroutine pass_proc_to_real()
   real(8), external :: proc
@@ -82,7 +84,7 @@ subroutine pass_complex_to_real(cmplx)
 end subroutine
 ! CHECK-LABEL: func.func @_QPpass_complex_to_real(
 ! CHECK:  %[[VAL_1:.*]]:2 = hlfir.declare {{.*}}Ecmplx
-! CHECK:  %[[VAL_2:.*]] = fir.convert %[[VAL_1]]#1 : (!fir.ref<!fir.complex<4>>) -> !fir.ref<f64>
+! CHECK:  %[[VAL_2:.*]] = fir.convert %[[VAL_1]]#0 : (!fir.ref<complex<f32>>) -> !fir.ref<f64>
 ! CHECK:  fir.call @_QPtakes_real(%[[VAL_2]]) {{.*}}: (!fir.ref<f64>) -> ()
 
 subroutine takes_char_proc(c)
@@ -105,10 +107,11 @@ subroutine pass_char_to_char_proc(c)
   call takes_char_proc(c)
 end subroutine
 ! CHECK-LABEL: func.func @_QPpass_char_to_char_proc(
-! CHECK:  %[[VAL_3:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_2:.*]]:2 = hlfir.declare {{.*}}Ec
+! CHECK:  %[[VAL_3:.*]] = fir.emboxchar %[[VAL_2]]#0, %{{.*}} : (!fir.ref<!fir.char<1,8>>, index) -> !fir.boxchar<1>
 ! CHECK:  %[[VAL_4:.*]] = fir.address_of(@_QPtakes_char_proc) : (tuple<!fir.boxproc<() -> ()>, i64>) -> ()
 ! CHECK:  %[[VAL_5:.*]] = fir.convert %[[VAL_4]] : ((tuple<!fir.boxproc<() -> ()>, i64>) -> ()) -> ((!fir.boxchar<1>) -> ())
-! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]#0) {{.*}}: (!fir.boxchar<1>) -> ()
+! CHECK:  fir.call %[[VAL_5]](%[[VAL_3]]) {{.*}}: (!fir.boxchar<1>) -> ()
 
 subroutine takes_proc(proc)
   real(8), external :: proc
@@ -137,7 +140,7 @@ end subroutine
 ! CHECK:  %[[VAL_1:.*]]:2 = hlfir.declare {{.*}}Er
 ! CHECK:  %[[VAL_2:.*]] = fir.address_of(@_QPtakes_proc) : (!fir.boxproc<() -> ()>) -> ()
 ! CHECK:  %[[VAL_3:.*]] = fir.convert %[[VAL_2]] : ((!fir.boxproc<() -> ()>) -> ()) -> ((!fir.ref<f64>) -> ())
-! CHECK:  fir.call %[[VAL_3]](%[[VAL_1]]#1) {{.*}}: (!fir.ref<f64>) -> ()
+! CHECK:  fir.call %[[VAL_3]](%[[VAL_1]]#0) {{.*}}: (!fir.ref<f64>) -> ()
 
 subroutine pass_too_many_args()
   call takes_real(I, Kown, what, I, am, doing)

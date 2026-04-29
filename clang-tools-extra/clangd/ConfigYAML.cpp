@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "ConfigFragment.h"
+#include "support/Logger.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
@@ -14,7 +15,6 @@
 #include "llvm/Support/YAMLParser.h"
 #include <optional>
 #include <string>
-#include <system_error>
 
 namespace clang {
 namespace clangd {
@@ -68,6 +68,7 @@ public:
     Dict.handle("Completion", [&](Node &N) { parse(F.Completion, N); });
     Dict.handle("Hover", [&](Node &N) { parse(F.Hover, N); });
     Dict.handle("InlayHints", [&](Node &N) { parse(F.InlayHints, N); });
+    Dict.handle("SemanticTokens", [&](Node &N) { parse(F.SemanticTokens, N); });
     Dict.parse(N);
     return !(N.failed() || HadError);
   }
@@ -104,6 +105,10 @@ private:
       if (auto Values = scalarValues(N))
         F.Remove = std::move(*Values);
     });
+    Dict.handle("BuiltinHeaders", [&](Node &N) {
+      if (auto BuiltinHeaders = scalarValue(N, "BuiltinHeaders"))
+        F.BuiltinHeaders = *BuiltinHeaders;
+    });
     Dict.handle("CompilationDatabase", [&](Node &N) {
       F.CompilationDatabase = scalarValue(N, "CompilationDatabase");
     });
@@ -115,6 +120,14 @@ private:
     Dict.handle("FullyQualifiedNamespaces", [&](Node &N) {
       if (auto Values = scalarValues(N))
         F.FullyQualifiedNamespaces = std::move(*Values);
+    });
+    Dict.handle("QuotedHeaders", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.QuotedHeaders = std::move(*Values);
+    });
+    Dict.handle("AngledHeaders", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.AngledHeaders = std::move(*Values);
     });
     Dict.parse(N);
   }
@@ -133,9 +146,6 @@ private:
     });
     Dict.handle("Includes", [&](Node &N) { parse(F.Includes, N); });
     Dict.handle("ClangTidy", [&](Node &N) { parse(F.ClangTidy, N); });
-    Dict.handle("AllowStalePreamble", [&](Node &N) {
-      F.AllowStalePreamble = boolValue(N, "AllowStalePreamble");
-    });
     Dict.parse(N);
   }
 
@@ -158,6 +168,10 @@ private:
       });
       CheckOptDict.parse(N);
     });
+    Dict.handle("FastCheckFilter", [&](Node &N) {
+      if (auto FastCheckFilter = scalarValue(N, "FastCheckFilter"))
+        F.FastCheckFilter = *FastCheckFilter;
+    });
     Dict.parse(N);
   }
 
@@ -166,6 +180,10 @@ private:
     Dict.handle("IgnoreHeader", [&](Node &N) {
       if (auto Values = scalarValues(N))
         F.IgnoreHeader = std::move(*Values);
+    });
+    Dict.handle("AnalyzeAngledIncludes", [&](Node &N) {
+      if (auto Value = boolValue(N, "AnalyzeAngledIncludes"))
+        F.AnalyzeAngledIncludes = *Value;
     });
     Dict.parse(N);
   }
@@ -224,6 +242,18 @@ private:
       if (auto AllScopes = boolValue(N, "AllScopes"))
         F.AllScopes = *AllScopes;
     });
+    Dict.handle("ArgumentLists", [&](Node &N) {
+      if (auto ArgumentLists = scalarValue(N, "ArgumentLists"))
+        F.ArgumentLists = *ArgumentLists;
+    });
+    Dict.handle("HeaderInsertion", [&](Node &N) {
+      if (auto HeaderInsertion = scalarValue(N, "HeaderInsertion"))
+        F.HeaderInsertion = *HeaderInsertion;
+    });
+    Dict.handle("CodePatterns", [&](Node &N) {
+      if (auto CodePatterns = scalarValue(N, "CodePatterns"))
+        F.CodePatterns = *CodePatterns;
+    });
     Dict.parse(N);
   }
 
@@ -253,6 +283,31 @@ private:
     Dict.handle("Designators", [&](Node &N) {
       if (auto Value = boolValue(N, "Designators"))
         F.Designators = *Value;
+    });
+    Dict.handle("BlockEnd", [&](Node &N) {
+      if (auto Value = boolValue(N, "BlockEnd"))
+        F.BlockEnd = *Value;
+    });
+    Dict.handle("DefaultArguments", [&](Node &N) {
+      if (auto Value = boolValue(N, "DefaultArguments"))
+        F.DefaultArguments = *Value;
+    });
+    Dict.handle("TypeNameLimit", [&](Node &N) {
+      if (auto Value = uint32Value(N, "TypeNameLimit"))
+        F.TypeNameLimit = *Value;
+    });
+    Dict.parse(N);
+  }
+
+  void parse(Fragment::SemanticTokensBlock &F, Node &N) {
+    DictParser Dict("SemanticTokens", this);
+    Dict.handle("DisabledKinds", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.DisabledKinds = std::move(*Values);
+    });
+    Dict.handle("DisabledModifiers", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.DisabledModifiers = std::move(*Values);
     });
     Dict.parse(N);
   }
@@ -375,6 +430,17 @@ private:
     return std::nullopt;
   }
 
+  std::optional<Located<uint32_t>> uint32Value(Node &N, llvm::StringRef Desc) {
+    if (auto Scalar = scalarValue(N, Desc)) {
+      unsigned long long Num;
+      if (!llvm::getAsUnsignedInteger(**Scalar, 0, Num)) {
+        return Located<uint32_t>(Num, Scalar->Range);
+      }
+    }
+    warning(Desc + " invalid number", N);
+    return std::nullopt;
+  }
+
   // Try to parse a list of single scalar values, or just a single value.
   std::optional<std::vector<Located<std::string>>> scalarValues(Node &N) {
     std::vector<Located<std::string>> Result;
@@ -421,6 +487,7 @@ std::vector<Fragment> Fragment::parseYAML(llvm::StringRef YAML,
                                           DiagnosticCallback Diags) {
   // The YAML document may contain multiple conditional fragments.
   // The SourceManager is shared for all of them.
+  log("Loading config file at {0}", BufferName);
   auto SM = std::make_shared<llvm::SourceMgr>();
   auto Buf = llvm::MemoryBuffer::getMemBufferCopy(YAML, BufferName);
   // Adapt DiagnosticCallback to function-pointer interface.

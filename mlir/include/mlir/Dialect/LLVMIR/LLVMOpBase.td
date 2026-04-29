@@ -14,100 +14,10 @@
 #ifndef LLVMIR_OP_BASE
 #define LLVMIR_OP_BASE
 
+include "mlir/Dialect/LLVMIR/LLVMAttrDefs.td"
 include "mlir/Dialect/LLVMIR/LLVMInterfaces.td"
-include "mlir/IR/EnumAttr.td"
 include "mlir/IR/OpBase.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
-
-//===----------------------------------------------------------------------===//
-// LLVM Dialect.
-//===----------------------------------------------------------------------===//
-
-def LLVM_Dialect : Dialect {
-  let name = "llvm";
-  let cppNamespace = "::mlir::LLVM";
-
-  let useDefaultAttributePrinterParser = 1;
-  let hasRegionArgAttrVerify = 1;
-  let hasRegionResultAttrVerify = 1;
-  let hasOperationAttrVerify = 1;
-
-  let extraClassDeclaration = [{
-    /// Name of the data layout attributes.
-    static StringRef getDataLayoutAttrName() { return "llvm.data_layout"; }
-    static StringRef getNoAliasScopesAttrName() { return "noalias_scopes"; }
-    static StringRef getAliasScopesAttrName() { return "alias_scopes"; }
-    static StringRef getAccessGroupsAttrName() { return "access_groups"; }
-
-    /// Names of llvm parameter attributes.
-    static StringRef getAlignAttrName() { return "llvm.align"; }
-    static StringRef getAllocAlignAttrName() { return "llvm.allocalign"; }
-    static StringRef getAllocatedPointerAttrName() { return "llvm.allocptr"; }
-    static StringRef getByValAttrName() { return "llvm.byval"; }
-    static StringRef getByRefAttrName() { return "llvm.byref"; }
-    static StringRef getNoUndefAttrName() { return "llvm.noundef"; }
-    static StringRef getDereferenceableAttrName() { return "llvm.dereferenceable"; }
-    static StringRef getDereferenceableOrNullAttrName() { return "llvm.dereferenceable_or_null"; }
-    static StringRef getInAllocaAttrName() { return "llvm.inalloca"; }
-    static StringRef getInRegAttrName() { return "llvm.inreg"; }
-    static StringRef getNestAttrName() { return "llvm.nest"; }
-    static StringRef getNoAliasAttrName() { return "llvm.noalias"; }
-    static StringRef getNoCaptureAttrName() { return "llvm.nocapture"; }
-    static StringRef getNoFreeAttrName() { return "llvm.nofree"; }
-    static StringRef getNonNullAttrName() { return "llvm.nonnull"; }
-    static StringRef getPreallocatedAttrName() { return "llvm.preallocated"; }
-    static StringRef getReadonlyAttrName() { return "llvm.readonly"; }
-    static StringRef getReturnedAttrName() { return "llvm.returned"; }
-    static StringRef getSExtAttrName() { return "llvm.signext"; }
-    static StringRef getStackAlignmentAttrName() { return "llvm.alignstack"; }
-    static StringRef getStructRetAttrName() { return "llvm.sret"; }
-    static StringRef getWriteOnlyAttrName() { return "llvm.writeonly"; }
-    static StringRef getZExtAttrName() { return "llvm.zeroext"; }
-    // TODO Restrict the usage of this to parameter attributes once there is an
-    // alternative way of modeling memory effects on FunctionOpInterface.
-    /// Name of the attribute that will cause the creation of a readnone memory
-    /// effect when lowering to the LLVMDialect.
-    static StringRef getReadnoneAttrName() { return "llvm.readnone"; }
-
-    /// Verifies if the given string is a well-formed data layout descriptor.
-    /// Uses `reportError` to report errors.
-    static LogicalResult verifyDataLayoutString(
-        StringRef descr, llvm::function_ref<void (const Twine &)> reportError);
-
-    /// Name of the target triple attribute.
-    static StringRef getTargetTripleAttrName() { return "llvm.target_triple"; }
-
-    /// Name of the C wrapper emission attribute.
-    static StringRef getEmitCWrapperAttrName() {
-      return "llvm.emit_c_interface";
-    }
-
-    /// Returns `true` if the given type is compatible with the LLVM dialect.
-    static bool isCompatibleType(Type);
-
-
-    Type parseType(DialectAsmParser &p) const override;
-    void printType(Type, DialectAsmPrinter &p) const override;
-
-  private:
-    /// Verifies a parameter attribute attached to a parameter of type
-    /// paramType.
-    LogicalResult verifyParameterAttribute(Operation *op,
-                                           Type paramType,
-                                           NamedAttribute paramAttr);
-
-    /// Register all types.
-    void registerTypes();
-
-    /// A cache storing compatible LLVM types that have been verified. This
-    /// can save us lots of verification time if there are many occurrences
-    /// of some deeply-nested aggregate types in the program.
-    ThreadLocalCache<DenseSet<Type>> compatibleTypes;
-
-    /// Register the attributes of this dialect.
-    void registerAttributes();
-  }];
-}
 
 //===----------------------------------------------------------------------===//
 // LLVM dialect type constraints.
@@ -120,7 +30,7 @@ def LLVM_Type : DialectType<LLVM_Dialect,
 
 // Type constraint accepting LLVM token type.
 def LLVM_TokenType : Type<
-  CPred<"$_self.isa<::mlir::LLVM::LLVMTokenType>()">,
+  CPred<"::llvm::isa<::mlir::LLVM::LLVMTokenType>($_self)">,
   "LLVM token type">,
   BuildableType<"::mlir::LLVM::LLVMTokenType::get($_builder.getContext())">;
 
@@ -128,12 +38,12 @@ def LLVM_TokenType : Type<
 // and function.
 def LLVM_PrimitiveType : Type<
   And<[LLVM_Type.predicate,
-       CPred<"!$_self.isa<::mlir::LLVM::LLVMVoidType, "
-                         "::mlir::LLVM::LLVMFunctionType>()">]>,
+       CPred<"!::llvm::isa<::mlir::LLVM::LLVMVoidType, "
+                         "::mlir::LLVM::LLVMFunctionType>($_self)">]>,
   "primitive LLVM type">;
 
 // Type constraint accepting any LLVM function type.
-def LLVM_FunctionType : Type<CPred<"$_self.isa<::mlir::LLVM::LLVMFunctionType>()">,
+def LLVM_FunctionType : Type<CPred<"::llvm::isa<::mlir::LLVM::LLVMFunctionType>($_self)">,
                          "LLVM function type", "::mlir::LLVM::LLVMFunctionType">;
 
 // Type constraint accepting any LLVM floating point type.
@@ -142,49 +52,57 @@ def LLVM_AnyFloat : Type<
   "floating point LLVM type">;
 
 // Type constraint accepting any LLVM pointer type.
-def LLVM_AnyPointer : Type<CPred<"$_self.isa<::mlir::LLVM::LLVMPointerType>()">,
+def LLVM_AnyPointer : Type<CPred<"::llvm::isa<::mlir::LLVM::LLVMPointerType>($_self)">,
                           "LLVM pointer type", "::mlir::LLVM::LLVMPointerType">;
 
-// Type constraint accepting LLVM pointer type with an additional constraint
-// on the element type.
-class LLVM_PointerTo<Type pointee> : Type<
+// Pointer in a given address space.
+class LLVM_PointerInAddressSpace<int addressSpace> : Type<
   And<[LLVM_AnyPointer.predicate,
-       Or<[CPred<"$_self.cast<::mlir::LLVM::LLVMPointerType>().isOpaque()">,
-           SubstLeaves<
-             "$_self",
-             "$_self.cast<::mlir::LLVM::LLVMPointerType>().getElementType()",
-             pointee.predicate>]>]>,
-  "LLVM pointer to " # pointee.summary, "::mlir::LLVM::LLVMPointerType">;
+      CPred<
+        "::llvm::cast<::mlir::LLVM::LLVMPointerType>($_self).getAddressSpace() == "
+        # addressSpace>]>,
+  "LLVM pointer in address space " # addressSpace,
+  "::mlir::LLVM::LLVMPointerType"> {
+  let builderCall = "$_builder.getType<::mlir::LLVM::LLVMPointerType>("
+    # addressSpace # ")";
+}
 
-// Type constraints accepting LLVM pointer type to integer of a specific width.
-class LLVM_IntPtrBase<int width, int addressSpace = 0> : Type<
-  And<[LLVM_PointerTo<I<width>>.predicate,
-       CPred<"$_self.cast<::mlir::LLVM::LLVMPointerType>().getAddressSpace()"
-             " == " # addressSpace>]>,
-  "LLVM pointer to " # I<width>.summary>;
-
-def LLVM_i8Ptr : LLVM_IntPtrBase<8>;
+// Type constraint accepting an LLVM pointer type in address space 0.
+def LLVM_DefaultPointer : LLVM_PointerInAddressSpace<0>;
 
 // Type constraint accepting any LLVM structure type.
-def LLVM_AnyStruct : Type<CPred<"$_self.isa<::mlir::LLVM::LLVMStructType>()">,
+def LLVM_AnyStruct : Type<CPred<"::llvm::isa<::mlir::LLVM::LLVMStructType>($_self)">,
                          "LLVM structure type">;
 
 // Type constraint accepting opaque LLVM structure type.
 def LLVM_OpaqueStruct : Type<
   And<[LLVM_AnyStruct.predicate,
-       CPred<"$_self.cast<::mlir::LLVM::LLVMStructType>().isOpaque()">]>>;
+       CPred<"::llvm::cast<::mlir::LLVM::LLVMStructType>($_self).isOpaque()">]>>;
+
+// Type constraint accepting any LLVM target extension type.
+def LLVM_AnyTargetExt : Type<CPred<"::llvm::isa<::mlir::LLVM::LLVMTargetExtType>($_self)">,
+                            "LLVM target extension type">;
+
+// Type constraint accepting LLVM target extension types with no support for
+// memory operations such as alloca, load and store.
+def LLVM_NonLoadableTargetExtType : Type<
+  And<[LLVM_AnyTargetExt.predicate,
+        CPred<"!::llvm::cast<::mlir::LLVM::LLVMTargetExtType>($_self).supportsMemOps()">]
+        >>;
 
 // Type constraint accepting any LLVM type that can be loaded or stored, i.e. a
-// type that has size (not void, function or opaque struct type).
+// type that has size (not void, function, opaque struct type or target
+// extension type which does not support memory operations).
 def LLVM_LoadableType : Type<
-  Or<[And<[LLVM_PrimitiveType.predicate, Neg<LLVM_OpaqueStruct.predicate>]>,
+  Or<[And<[LLVM_PrimitiveType.predicate, Neg<LLVM_OpaqueStruct.predicate>,
+          Neg<LLVM_NonLoadableTargetExtType.predicate>]>,
       LLVM_PointerElementTypeInterface.predicate]>,
   "LLVM type with size">;
 
 // Type constraint accepting any LLVM aggregate type, i.e. structure or array.
 def LLVM_AnyAggregate : Type<
-  CPred<"$_self.isa<::mlir::LLVM::LLVMStructType, "
-                   "::mlir::LLVM::LLVMArrayType>()">,
+  CPred<"::llvm::isa<::mlir::LLVM::LLVMStructType, "
+                   "::mlir::LLVM::LLVMArrayType>($_self)">,
   "LLVM aggregate type">;
 
 // Type constraint accepting any LLVM non-aggregate type, i.e. not structure or
@@ -195,17 +113,20 @@ def LLVM_AnyNonAggregate : Type<And<[LLVM_Type.predicate,
 
 // Type constraint accepting any LLVM vector type.
 def LLVM_AnyVector : Type<CPred<"::mlir::LLVM::isCompatibleVectorType($_self)">,
-                         "LLVM dialect-compatible vector type">;
+                         "LLVM dialect-compatible vector type",
+                         "::mlir::VectorType">;
 
 // Type constraint accepting any LLVM fixed-length vector type.
 def LLVM_AnyFixedVector : Type<CPred<
                                 "!::mlir::LLVM::isScalableVectorType($_self)">,
-                                "LLVM dialect-compatible fixed-length vector type">;
+                                "LLVM dialect-compatible fixed-length vector type",
+                                "::mlir::VectorType">;
 
 // Type constraint accepting any LLVM scalable vector type.
 def LLVM_AnyScalableVector : Type<CPred<
                                 "::mlir::LLVM::isScalableVectorType($_self)">,
-                                "LLVM dialect-compatible scalable vector type">;
+                                "LLVM dialect-compatible scalable vector type",
+                                "::mlir::VectorType">;
 
 // Type constraint accepting an LLVM vector type with an additional constraint
 // on the vector element type.
@@ -213,9 +134,10 @@ class LLVM_VectorOf<Type element> : Type<
   And<[LLVM_AnyVector.predicate,
        SubstLeaves<
          "$_self",
-         "::mlir::LLVM::getVectorElementType($_self)",
+         "::llvm::cast<::mlir::VectorType>($_self).getElementType()",
          element.predicate>]>,
-  "LLVM dialect-compatible vector of " # element.summary>;
+  "LLVM dialect-compatible vector of " # element.summary,
+  "::mlir::VectorType">;
 
 // Type constraint accepting a constrained type, or a vector of such types.
 class LLVM_ScalarOrVectorOf<Type element> :
@@ -249,7 +171,13 @@ class LLVM_OpBase<Dialect dialect, string mnemonic, list<Trait> traits = []> :
   //   - $_op - substituted by a reference to store the newly created MLIR
   //            operation (only for MLIR operations that return no result);
   //   - $_int_attr - substituted by a call to an integer attribute matcher;
+  //   - $_float_attr - substituted by a call to a float attribute matcher;
   //   - $_var_attr - substituted by a call to a variable attribute matcher;
+  //   - $_label_attr - substituted by a call to a label attribute matcher;
+  //   - $_roundingMode_attr - substituted by a call to a rounding mode
+  //     attribute matcher;
+  //   - $_fpExceptionBehavior_attr - substituted by a call to a FP exception
+  //     behavior attribute matcher;
   //   - $_resultType - substituted with the MLIR result type;
   //   - $_location - substituted with the MLIR location;
   //   - $_builder - substituted with the MLIR builder;
@@ -266,59 +194,6 @@ class LLVM_OpBase<Dialect dialect, string mnemonic, list<Trait> traits = []> :
   // and set a specific argument index to -1 if it does not map to an LLVM IR
   // operand.
   list<int> llvmArgIndices = [];
-}
-
-//===----------------------------------------------------------------------===//
-// Base classes for LLVM enum attributes.
-//===----------------------------------------------------------------------===//
-
-// Case of the LLVM enum attribute backed by I64Attr with customized string
-// representation that corresponds to what is visible in the textual IR form.
-// The parameters are as follows:
-//   - `cppSym`: name of the C++ enumerant for this case in MLIR API;
-//   - `irSym`: keyword used in the custom form of MLIR operation;
-//   - `llvmSym`: name of the C++ enumerant for this case in LLVM API.
-// For example, `LLVM_EnumAttrCase<"Weak", "weak", "WeakAnyLinkage">` is usable
-// as `<MlirEnumName>::Weak` in MLIR API, `WeakAnyLinkage` in LLVM API and
-// is printed/parsed as `weak` in MLIR custom textual format.
-class LLVM_EnumAttrCase<string cppSym, string irSym, string llvmSym, int val> :
-    I64EnumAttrCase<cppSym, val, irSym> {
-  // The name of the equivalent enumerant in LLVM.
-  string llvmEnumerant = llvmSym;
-}
-
-// LLVM enum attribute backed by I64Attr with string representation
-// corresponding to what is visible in the textual IR form.
-// The parameters are as follows:
-//   - `name`: name of the C++ enum class in MLIR API;
-//   - `llvmName`: name of the C++ enum in LLVM API;
-//   - `description`: textual description for documentation purposes;
-//   - `cases`: list of enum cases;
-//   - `unsupportedCases`: optional list of unsupported enum cases.
-// For example, `LLVM_EnumAttr<Linkage, "::llvm::GlobalValue::LinkageTypes`
-// produces `mlir::LLVM::Linkage` enum class in MLIR API that corresponds to (a
-// subset of) values in the `llvm::GlobalValue::LinkageTypes` in LLVM API.
-// All unsupported cases are excluded from the MLIR enum and trigger an error
-// during the import from LLVM IR. They are useful to handle sentinel values
-// such as `llvm::AtomicRMWInst::BinOp::BAD_BINOP` that LLVM commonly uses to
-// terminate its enums.
-class LLVM_EnumAttr<string name, string llvmName, string description,
-                    list<LLVM_EnumAttrCase> cases,
-                    list<LLVM_EnumAttrCase> unsupportedCases = []> :
-    I64EnumAttr<name, description, cases> {
-  // List of unsupported cases that have no conversion to an MLIR value.
-  list<LLVM_EnumAttrCase> unsupported = unsupportedCases;
-
-  // The equivalent enum class name in LLVM.
-  string llvmClassName = llvmName;
-}
-
-// LLVM_CEnumAttr is functionally identical to LLVM_EnumAttr, but to be used for
-// non-class enums.
-class LLVM_CEnumAttr<string name, string llvmNS, string description,
-      list<LLVM_EnumAttrCase> cases> :
-    I64EnumAttr<name, description, cases> {
-  string llvmClassName = llvmNS;
 }
 
 //===----------------------------------------------------------------------===//
@@ -358,6 +233,12 @@ class LLVM_MemOpPatterns {
       inst->setMetadata(llvm::LLVMContext::MD_nontemporal, metadata);
     }
   }];
+  code setInvariantGroupCode = [{
+    if ($invariantGroup) {
+      llvm::MDNode *metadata = llvm::MDNode::get(inst->getContext(), {});
+      inst->setMetadata(llvm::LLVMContext::MD_invariant_group, metadata);
+    }
+  }];
   code setAccessGroupsMetadataCode = [{
     moduleTranslation.setAccessGroupsMetadata(op, inst);
   }];
@@ -365,27 +246,6 @@ class LLVM_MemOpPatterns {
     moduleTranslation.setAliasScopeMetadata(op, inst);
     moduleTranslation.setTBAAMetadata(op, inst);
   }];
-}
-
-// Patterns with code obtaining the LLVM IR type of the given operand or result
-// of operation. "$0" is expected to be replaced by the position of the operand
-// or result in the operation.
-def LLVM_IntrPatterns {
-  string operand =
-    [{moduleTranslation.convertType(opInst.getOperand($0).getType())}];
-  string result =
-    [{moduleTranslation.convertType(opInst.getResult($0).getType())}];
-  string structResult =
-    [{moduleTranslation.convertType(
-        opInst.getResult(0).getType().cast<LLVM::LLVMStructType>()
-              .getBody()[$0])}];
-}
-
-// For every value in the list, substitutes the value in the place of "$0" in
-// "pattern" and stores the list of strings as "lst".
-class ListIntSubst<string pattern, list<int> values> {
-  list<string> lst = !foreach(x, values,
-                              !subst("$0", !cast<string>(x), pattern));
 }
 
 //===----------------------------------------------------------------------===//
@@ -406,10 +266,10 @@ class LLVM_MemAccessOpBase<string mnemonic, list<Trait> traits = []> :
       DeclareOpInterfaceMethods<AccessGroupOpInterface>,
       DeclareOpInterfaceMethods<AliasAnalysisOpInterface>], traits)>,
     LLVM_MemOpPatterns {
-  dag aliasAttrs = (ins OptionalAttr<SymbolRefArrayAttr>:$access_groups,
-                    OptionalAttr<SymbolRefArrayAttr>:$alias_scopes,
-                    OptionalAttr<SymbolRefArrayAttr>:$noalias_scopes,
-                    OptionalAttr<SymbolRefArrayAttr>:$tbaa);
+  dag aliasAttrs = (ins OptionalAttr<LLVM_AccessGroupArrayAttr>:$access_groups,
+                    OptionalAttr<LLVM_AliasScopeArrayAttr>:$alias_scopes,
+                    OptionalAttr<LLVM_AliasScopeArrayAttr>:$noalias_scopes,
+                    OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa);
 }
 
 // Base class for LLVM intrinsics operation. It is similar to LLVM_Op, but
@@ -431,12 +291,19 @@ class LLVM_MemAccessOpBase<string mnemonic, list<Trait> traits = []> :
 // interfaces the intrinsic implements. If the corresponding flags are set, the
 // "aliasAttrs" list contains the arguments required by the access group and
 // alias analysis interfaces. Derived intrinsics should append the "aliasAttrs"
-// to their argument list if they set one of the flags.
+// to their argument list if they set one of the flags. LLVM `immargs` can be
+// represented as MLIR attributes by providing both the `immArgPositions` and
+// `immArgAttrNames` lists. These two lists should have equal length, with
+// `immArgPositions` containing the argument positions on the LLVM IR attribute
+// that are `immargs`, and `immArgAttrNames` mapping these to corresponding
+// MLIR attributes.
 class LLVM_IntrOpBase<Dialect dialect, string opName, string enumName,
                       list<int> overloadedResults, list<int> overloadedOperands,
                       list<Trait> traits, int numResults,
                       bit requiresAccessGroup = 0, bit requiresAliasAnalysis = 0,
-                      bit requiresFastmath = 0>
+                      bit requiresFastmath = 0, bit requiresOpBundles = 0,
+                      list<int> immArgPositions = [],
+                      list<string> immArgAttrNames = []>
     : LLVM_OpBase<dialect, opName, !listconcat(
         !if(!gt(requiresAccessGroup, 0),
             [DeclareOpInterfaceMethods<AccessGroupOpInterface>], []),
@@ -449,47 +316,81 @@ class LLVM_IntrOpBase<Dialect dialect, string opName, string enumName,
       Results<!if(!gt(numResults, 0), (outs LLVM_Type:$res), (outs))> {
   dag aliasAttrs = !con(
         !if(!gt(requiresAccessGroup, 0),
-            (ins OptionalAttr<SymbolRefArrayAttr>:$access_groups),
+            (ins OptionalAttr<LLVM_AccessGroupArrayAttr>:$access_groups),
             (ins )),
-        !if(!gt(requiresAccessGroup, 0),
-            (ins OptionalAttr<SymbolRefArrayAttr>:$alias_scopes,
-                 OptionalAttr<SymbolRefArrayAttr>:$noalias_scopes,
-                 OptionalAttr<SymbolRefArrayAttr>:$tbaa),
+        !if(!gt(requiresAliasAnalysis, 0),
+            (ins OptionalAttr<LLVM_AliasScopeArrayAttr>:$alias_scopes,
+                 OptionalAttr<LLVM_AliasScopeArrayAttr>:$noalias_scopes,
+                 OptionalAttr<LLVM_TBAATagArrayAttr>:$tbaa),
             (ins )));
-  string resultPattern = !if(!gt(numResults, 1),
-                             LLVM_IntrPatterns.structResult,
-                             LLVM_IntrPatterns.result);
+  dag opBundleArgs = !if(!gt(requiresOpBundles, 0),
+                         (ins VariadicOfVariadic<LLVM_Type,
+                                "op_bundle_sizes">:$op_bundle_operands,
+                              DenseI32ArrayAttr:$op_bundle_sizes,
+                              OptionalAttr<ArrayAttr>:$op_bundle_tags),
+                         (ins ));
   string llvmEnumName = enumName;
-  let llvmBuilder = [{
-    llvm::Module *module = builder.GetInsertBlock()->getModule();
-    llvm::Function *fn = llvm::Intrinsic::getDeclaration(
-        module,
-        llvm::Intrinsic::}] # enumName # [{,
-        { }] # !interleave(!listconcat(
-            ListIntSubst<resultPattern, overloadedResults>.lst,
-            ListIntSubst<LLVM_IntrPatterns.operand,
-                         overloadedOperands>.lst), ", ") # [{
-        });
-    auto operands = moduleTranslation.lookupValues(opInst.getOperands());
-    }] # [{
-    auto *inst = builder.CreateCall(fn, operands);
+  string overloadedResultsCpp =  "{" # !interleave(overloadedResults, ", ") # "}";
+  string overloadedOperandsCpp =  "{" # !interleave(overloadedOperands, ", ") # "}";
+  string immArgPositionsCpp = "{" # !interleave(immArgPositions, ", ") # "}";
+  string immArgAttrNamesCpp = "{" # !interleave(!foreach(name, immArgAttrNames,
+    "StringLiteral(\"" # name # "\")"), ", ") # "}";
+  string baseLlvmBuilder = [{
+    auto *inst = LLVM::detail::createIntrinsicCall(
+      builder, moduleTranslation, &opInst, llvm::Intrinsic::}] # !interleave([
+        enumName, "" # numResults, overloadedResultsCpp, overloadedOperandsCpp,
+        immArgPositionsCpp, immArgAttrNamesCpp], ",") # [{);
     (void) inst;
-    }] # !if(!gt(requiresAccessGroup, 0), setAccessGroupsMetadataCode, "")
+    }];
+  string baseLlvmBuilderCoda = !if(!gt(numResults, 0), "$res = inst;", "");
+  let llvmBuilder =  baseLlvmBuilder # !if(!gt(requiresAccessGroup, 0), setAccessGroupsMetadataCode, "")
        # !if(!gt(requiresAliasAnalysis, 0), setAliasAnalysisMetadataCode, "")
-       # !if(!gt(numResults, 0), "$res = inst;", "");
+       # baseLlvmBuilderCoda;
 
-  string mlirBuilder = [{
-    FailureOr<SmallVector<Value>> mlirOperands =
-      moduleImport.convertValues(llvmOperands);
-    if (failed(mlirOperands))
+  string baseMlirBuilder = [{
+    SmallVector<Value> mlirOperands;
+    SmallVector<NamedAttribute> mlirAttrs;
+    if (failed(moduleImport.convertIntrinsicArguments(
+      llvmOperands,
+      llvmOpBundles,
+      }] # !if(!gt(requiresOpBundles, 0), "true", "false") # [{,
+      }] # immArgPositionsCpp # [{,
+      }] # immArgAttrNamesCpp # [{,
+      mlirOperands,
+      mlirAttrs))
+    ) {
       return failure();
+    }
     SmallVector<Type> resultTypes =
     }] # !if(!gt(numResults, 0), "{$_resultType};", "{};") # [{
     auto op = $_builder.create<$_qualCppClassName>(
-      $_location, resultTypes, *mlirOperands);
-    }] # !if(!gt(requiresFastmath, 0),
+      $_location, resultTypes, mlirOperands, mlirAttrs);
+    }];
+  string baseMlirBuilderCoda = !if(!gt(numResults, 0), "$res = op;", "$_op = op;");
+  let mlirBuilder = baseMlirBuilder # !if(!gt(requiresFastmath, 0),
       "moduleImport.setFastmathFlagsAttr(inst, op);", "")
-    # !if(!gt(numResults, 0), "$res = op;", "$_op = op;");
+    # baseMlirBuilderCoda;
+
+  // Code for handling a `range` attribute that holds the constant range of the
+  // intrinsic's result (if one is specified at the call site). This is intended
+  // for GPU IDs and other calls where range() is meaningful. It expects
+  // an optional LLVM_ConstantRangeAttr named `range` to be present on the
+  // operation. These are included to abstract out common code in several
+  // dialects.
+  string setRangeRetAttrCode = [{
+    if ($range) {
+      inst->addRangeRetAttr(::llvm::ConstantRange(
+        $range->getLower(), $range->getUpper()));
+    }
+  }];
+  string importRangeRetAttrCode = [{
+    // Note: we don't want to look in to the declaration here.
+    auto rangeAttr = inst->getAttributes().getRetAttr(::llvm::Attribute::Range);
+    if (rangeAttr.isValid()) {
+      const ::llvm::ConstantRange& value = rangeAttr.getValueAsConstantRange();
+      op.setRangeAttr(::mlir::LLVM::ConstantRangeAttr::get($_builder.getContext(), value.getLower(), value.getUpper()));
+    }
+  }];
 }
 
 // Base class for LLVM intrinsic operations, should not be used directly. Places
@@ -497,11 +398,15 @@ class LLVM_IntrOpBase<Dialect dialect, string opName, string enumName,
 class LLVM_IntrOp<string mnem, list<int> overloadedResults,
                   list<int> overloadedOperands, list<Trait> traits,
                   int numResults, bit requiresAccessGroup = 0,
-                  bit requiresAliasAnalysis = 0, bit requiresFastmath = 0>
+                  bit requiresAliasAnalysis = 0, bit requiresFastmath = 0,
+                  bit requiresOpBundles = 0,
+                  list<int> immArgPositions = [],
+                  list<string> immArgAttrNames = []>
     : LLVM_IntrOpBase<LLVM_Dialect, "intr." # mnem, !subst(".", "_", mnem),
                       overloadedResults, overloadedOperands, traits,
                       numResults, requiresAccessGroup, requiresAliasAnalysis,
-                      requiresFastmath>;
+                      requiresFastmath, requiresOpBundles, immArgPositions,
+                      immArgAttrNames>;
 
 // Base class for LLVM intrinsic operations returning no results. Places the
 // intrinsic into the LLVM dialect and prefixes its name with "intr.".
@@ -520,9 +425,14 @@ class LLVM_IntrOp<string mnem, list<int> overloadedResults,
 class LLVM_ZeroResultIntrOp<string mnem, list<int> overloadedOperands = [],
                             list<Trait> traits = [],
                             bit requiresAccessGroup = 0,
-                            bit requiresAliasAnalysis = 0>
+                            bit requiresAliasAnalysis = 0,
+                            bit requiresOpBundles = 0,
+                            list<int> immArgPositions = [],
+                            list<string> immArgAttrNames = []>
     : LLVM_IntrOp<mnem, [], overloadedOperands, traits, /*numResults=*/0,
-                  requiresAccessGroup, requiresAliasAnalysis>;
+                  requiresAccessGroup, requiresAliasAnalysis,
+                  /*requiresFastMath=*/0, requiresOpBundles, immArgPositions,
+                  immArgAttrNames>;
 
 // Base class for LLVM intrinsic operations returning one result. Places the
 // intrinsic into the LLVM dialect and prefixes its name with "intr.". This is
@@ -533,10 +443,30 @@ class LLVM_ZeroResultIntrOp<string mnem, list<int> overloadedOperands = [],
 class LLVM_OneResultIntrOp<string mnem, list<int> overloadedResults = [],
                            list<int> overloadedOperands = [],
                            list<Trait> traits = [],
-                           bit requiresFastmath = 0>
+                           bit requiresFastmath = 0,
+                           list<int> immArgPositions = [],
+                           list<string> immArgAttrNames = []>
     : LLVM_IntrOp<mnem, overloadedResults, overloadedOperands, traits, 1,
                   /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/0,
-                  requiresFastmath>;
+                  requiresFastmath, /*requiresOpBundles=*/0, immArgPositions,
+                  immArgAttrNames>;
+
+// Base class for LLVM intrinsic operations returning two results. Places the
+// intrinsic into the LLVM dialect and prefixes its name with "intr.". This is
+// similar to LLVM_ZeroResultIntrOp but allows one to define Ops returning two
+// results. Additionally, the overloadedResults list should contain "0", "1"
+// if the result must be used to resolve overloaded intrinsics, or remain
+// empty otherwise.
+class LLVM_TwoResultIntrOp<string mnem, list<int> overloadedResults = [],
+                           list<int> overloadedOperands = [],
+                           list<Trait> traits = [],
+                           bit requiresFastmath = 0,
+                           list<int> immArgPositions = [],
+                           list<string> immArgAttrNames = []>
+    : LLVM_IntrOp<mnem, overloadedResults, overloadedOperands, traits, 2,
+                  /*requiresAccessGroup=*/0, /*requiresAliasAnalysis=*/0,
+                  requiresFastmath, /*requiresOpBundles=*/0, immArgPositions,
+                  immArgAttrNames>;
 
 def LLVM_OneResultOpBuilder :
   OpBuilder<(ins "Type":$resultType, "ValueRange":$operands,
@@ -564,7 +494,7 @@ def LLVM_VoidResultTypeOpBuilder :
     CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
   [{
     assert(isCompatibleType(resultType) && "result must be an LLVM type");
-    assert(resultType.isa<LLVMVoidType>() &&
+    assert(::llvm::isa<LLVMVoidType>(resultType) &&
            "for zero-result operands, only 'void' is accepted as result type");
     build($_builder, $_state, operands, attributes);
   }]>;

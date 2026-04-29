@@ -43,11 +43,16 @@ private:
 
   bool isBitFieldWidth(const clang::ast_matchers::MatchFinder::MatchResult &,
                        const FloatingLiteral &) const {
-     return false;
+    return false;
   }
 
-  bool isBitFieldWidth(const clang::ast_matchers::MatchFinder::MatchResult &Result,
-                       const IntegerLiteral &Literal) const;
+  bool
+  isBitFieldWidth(const clang::ast_matchers::MatchFinder::MatchResult &Result,
+                  const IntegerLiteral &Literal) const;
+
+  bool isUserDefinedLiteral(
+      const clang::ast_matchers::MatchFinder::MatchResult &Result,
+      const clang::Expr &Literal) const;
 
   template <typename L>
   void checkBoundMatch(const ast_matchers::MatchFinder::MatchResult &Result,
@@ -72,6 +77,10 @@ private:
     if (isBitFieldWidth(Result, *MatchedLiteral))
       return;
 
+    if (IgnoreUserDefinedLiterals &&
+        isUserDefinedLiteral(Result, *MatchedLiteral))
+      return;
+
     const StringRef LiteralSourceText = Lexer::getSourceText(
         CharSourceRange::getTokenRange(MatchedLiteral->getSourceRange()),
         *Result.SourceManager, getLangOpts());
@@ -85,6 +94,7 @@ private:
   const bool IgnoreBitFieldsWidths;
   const bool IgnorePowersOf2IntegerValues;
   const bool IgnoreTypeAliases;
+  const bool IgnoreUserDefinedLiterals;
   const StringRef RawIgnoredIntegerValues;
   const StringRef RawIgnoredFloatingPointValues;
 

@@ -14,7 +14,7 @@
 // power of two, its minimum value is 1 which means no alignment requirements.
 //
 // - MaybeAlign is an optional type, it may be undefined or set. When it's set
-// you can get the underlying Align type by using the getValue() method.
+// you can get the underlying Align type by using the value() method.
 //
 //===----------------------------------------------------------------------===//
 
@@ -100,7 +100,7 @@ public:
   /// Allow constructions of constexpr Align from types.
   /// Compile time equivalent to Align(alignof(T)).
   template <typename T> constexpr static Align Of() {
-    return Constant<std::alignment_of<T>::value>();
+    return Constant<std::alignment_of_v<T>>();
   }
 
   /// Constexpr constructor from LogValue type.

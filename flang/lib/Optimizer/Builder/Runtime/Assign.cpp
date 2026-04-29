@@ -54,3 +54,44 @@ void fir::runtime::genAssignExplicitLengthCharacter(fir::FirOpBuilder &builder,
                                             sourceBox, sourceFile, sourceLine);
   builder.create<fir::CallOp>(loc, func, args);
 }
+
+void fir::runtime::genAssignTemporary(fir::FirOpBuilder &builder,
+                                      mlir::Location loc, mlir::Value destBox,
+                                      mlir::Value sourceBox) {
+  auto func =
+      fir::runtime::getRuntimeFunc<mkRTKey(AssignTemporary)>(loc, builder);
+  auto fTy = func.getFunctionType();
+  auto sourceFile = fir::factory::locationToFilename(builder, loc);
+  auto sourceLine =
+      fir::factory::locationToLineNo(builder, loc, fTy.getInput(3));
+  auto args = fir::runtime::createArguments(builder, loc, fTy, destBox,
+                                            sourceBox, sourceFile, sourceLine);
+  builder.create<fir::CallOp>(loc, func, args);
+}
+
+void fir::runtime::genCopyInAssign(fir::FirOpBuilder &builder,
+                                   mlir::Location loc, mlir::Value destBox,
+                                   mlir::Value sourceBox) {
+  auto func = fir::runtime::getRuntimeFunc<mkRTKey(CopyInAssign)>(loc, builder);
+  auto fTy = func.getFunctionType();
+  auto sourceFile = fir::factory::locationToFilename(builder, loc);
+  auto sourceLine =
+      fir::factory::locationToLineNo(builder, loc, fTy.getInput(3));
+  auto args = fir::runtime::createArguments(builder, loc, fTy, destBox,
+                                            sourceBox, sourceFile, sourceLine);
+  builder.create<fir::CallOp>(loc, func, args);
+}
+
+void fir::runtime::genCopyOutAssign(fir::FirOpBuilder &builder,
+                                    mlir::Location loc, mlir::Value destBox,
+                                    mlir::Value sourceBox) {
+  auto func =
+      fir::runtime::getRuntimeFunc<mkRTKey(CopyOutAssign)>(loc, builder);
+  auto fTy = func.getFunctionType();
+  auto sourceFile = fir::factory::locationToFilename(builder, loc);
+  auto sourceLine =
+      fir::factory::locationToLineNo(builder, loc, fTy.getInput(3));
+  auto args = fir::runtime::createArguments(builder, loc, fTy, destBox,
+                                            sourceBox, sourceFile, sourceLine);
+  builder.create<fir::CallOp>(loc, func, args);
+}

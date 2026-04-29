@@ -11,10 +11,7 @@
 
    // Reports use-of-uninitialized-value, not analyzed
    XFAIL: target={{.*netbsd.*}}
-
-   // This is known to be broken with glibc-2.27+
-   // https://bugs.llvm.org/show_bug.cgi?id=37804
-   XFAIL: glibc-2.27
+   UNSUPPORTED: aarch64-target-arch
 
 */
 

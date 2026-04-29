@@ -46,13 +46,6 @@ lldb::LanguageType CompilerDeclContext::GetLanguage() {
   return {};
 }
 
-ConstString
-CompilerDeclContext::GetInstanceVariableName(lldb::LanguageType language) {
-  if (IsValid())
-    return m_type_system->GetInstanceVariableName(language);
-  return {};
-}
-
 bool CompilerDeclContext::IsContainedInLookup(CompilerDeclContext other) const {
   if (!IsValid())
     return false;
@@ -64,6 +57,13 @@ bool CompilerDeclContext::IsContainedInLookup(CompilerDeclContext other) const {
 
   return m_type_system->DeclContextIsContainedInLookup(m_opaque_decl_ctx,
                                                        other.m_opaque_decl_ctx);
+}
+
+std::vector<lldb_private::CompilerContext>
+CompilerDeclContext::GetCompilerContext() const {
+  if (IsValid())
+    return m_type_system->DeclContextGetCompilerContext(m_opaque_decl_ctx);
+  return {};
 }
 
 bool lldb_private::operator==(const lldb_private::CompilerDeclContext &lhs,

@@ -295,9 +295,9 @@ A code snippet for such a walk looks like this:
 .. code-block:: c++
 
   MemoryDef *Def;  // find who's optimized or defining for this MemoryDef
-  for (auto& U : Def->uses()) {
-    MemoryAccess *MA = cast<MemoryAccess>(Use.getUser());
-    if (auto *DefUser = cast_of_null<MemoryDef>MA)
+  for (auto &U : Def->uses()) {
+    MemoryAccess *MA = cast<MemoryAccess>(U.getUser());
+    if (auto *DefUser = dyn_cast<MemoryDef>(MA))
       if (DefUser->isOptimized() && DefUser->getOptimized() == Def) {
         // User who is optimized to Def
       } else {
@@ -312,19 +312,18 @@ the store.
 .. code-block:: c++
 
   checkUses(MemoryAccess *Def) { // Def can be a MemoryDef or a MemoryPhi.
-    for (auto& U : Def->uses()) {
-      MemoryAccess *MA = cast<MemoryAccess>(Use.getUser());
-      if (auto *MU = cast_of_null<MemoryUse>MA) {
+    for (auto &U : Def->uses()) {
+      MemoryAccess *MA = cast<MemoryAccess>(U.getUser());
+      if (auto *MU = dyn_cast<MemoryUse>(MA)) {
         // Process MemoryUse as needed.
-      }
-      else {
+      } else {
         // Process MemoryDef or MemoryPhi as needed.
 
         // As a user can come up twice, as an optimized access and defining
         // access, keep a visited list.
 
         // Check transitive uses as needed
-        checkUses (MA); // use a worklist for an iterative algorithm
+        checkUses(MA); // use a worklist for an iterative algorithm
       }
     }
   }
@@ -470,10 +469,10 @@ In practice, there are implementation details in LLVM that also affect the
 results' precision provided by ``MemorySSA``. For example, AliasAnalysis has various
 caps, or restrictions on looking through phis which can affect what ``MemorySSA``
 can infer. Changes made by different passes may make MemorySSA either "overly
-optimized" (it can provide a more acccurate result than if it were recomputed
+optimized" (it can provide a more accurate result than if it were recomputed
 from scratch), or "under optimized" (it could infer more if it were recomputed).
 This can lead to challenges to reproduced results in isolation with a single pass
-when the result relies on the state aquired by ``MemorySSA`` due to being updated by
+when the result relies on the state acquired by ``MemorySSA`` due to being updated by
 multiple subsequent passes.
 Passes that use and update ``MemorySSA`` should do so through the APIs provided by the
 ``MemorySSAUpdater``, or through calls on the Walker.

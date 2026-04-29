@@ -25,6 +25,7 @@ namespace targets {
 
 class LLVM_LIBRARY_VISIBILITY M68kTargetInfo : public TargetInfo {
   static const char *const GCCRegNames[];
+  static const TargetInfo::GCCRegAlias GCCRegAliases[];
 
   enum CPUKind {
     CK_Unknown,
@@ -36,12 +37,14 @@ class LLVM_LIBRARY_VISIBILITY M68kTargetInfo : public TargetInfo {
     CK_68060
   } CPU = CK_Unknown;
 
+  const TargetOptions &TargetOpts;
+
 public:
   M68kTargetInfo(const llvm::Triple &Triple, const TargetOptions &);
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
-  ArrayRef<Builtin::Info> getTargetBuiltins() const override;
+  llvm::SmallVector<Builtin::InfosShard> getTargetBuiltins() const override;
   bool hasFeature(StringRef Feature) const override;
   ArrayRef<const char *> getGCCRegNames() const override;
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override;
@@ -49,9 +52,14 @@ public:
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &info) const override;
   std::optional<std::string> handleAsmEscapedChar(char EscChar) const override;
-  const char *getClobbers() const override;
+  std::string_view getClobbers() const override;
   BuiltinVaListKind getBuiltinVaListKind() const override;
   bool setCPU(const std::string &Name) override;
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override;
+
+  std::pair<unsigned, unsigned> hardwareInterferenceSizes() const override {
+    return std::make_pair(32, 32);
+  }
 };
 
 } // namespace targets

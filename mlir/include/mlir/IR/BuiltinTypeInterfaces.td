@@ -17,6 +17,75 @@
 include "mlir/IR/OpBase.td"
 
 //===----------------------------------------------------------------------===//
+// VectorElementTypeInterface
+//===----------------------------------------------------------------------===//
+
+def VectorElementTypeInterface : TypeInterface<"VectorElementTypeInterface"> {
+  let cppNamespace = "::mlir";
+  let description = [{
+    Implementing this interface establishes a contract between this type and the
+    vector type, indicating that this type can be used as element of vectors.
+
+    Vector element types are treated as a bag of bits without any assumed
+    structure. The size of an element type must be a compile-time constant.
+    However, the bit-width may remain opaque or unavailable during
+    transformations that do not depend on the element type.
+
+    Note: This type interface is still evolving. It currently has no methods
+    and is just used as marker to allow types to opt into being vector elements.
+    This may change in the future, for example, to require types to provide
+    their size or alignment given a data layout. Please post an RFC before
+    adding this interface to additional types. Implementing this interface on
+    downstream types is discouraged, until we specified the exact properties of
+    a vector element type in more detail.
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// FloatTypeInterface
+//===----------------------------------------------------------------------===//
+
+def FloatTypeInterface : TypeInterface<"FloatType",
+    [VectorElementTypeInterface]> {
+  let cppNamespace = "::mlir";
+  let description = [{
+    This type interface should be implemented by all floating-point types. It
+    defines the LLVM APFloat semantics and provides a few helper functions.
+  }];
+
+  let methods = [
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns the APFloat semantics for this floating-point type.
+      }],
+      /*retTy=*/"const ::llvm::fltSemantics &",
+      /*methodName=*/"getFloatSemantics",
+      /*args=*/(ins)
+    >,
+    InterfaceMethod<
+      /*desc=*/[{
+        Returns a float type with bitwidth scaled by `scale`. Returns a "null"
+        float type if the scaled element type cannot be represented.
+      }],
+      /*retTy=*/"::mlir::FloatType",
+      /*methodName=*/"scaleElementBitwidth",
+      /*args=*/(ins "unsigned":$scale),
+      /*methodBody=*/"",
+      /*defaultImplementation=*/"return ::mlir::FloatType();"
+    >
+  ];
+
+  let extraClassDeclaration = [{
+    /// Return the bitwidth of this float type.
+    unsigned getWidth();
+
+    /// Return the width of the mantissa of this type.
+    /// The width includes the integer bit.
+    unsigned getFPMantissaWidth();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // MemRefElementTypeInterface
 //===----------------------------------------------------------------------===//
 
@@ -42,6 +111,59 @@ def MemRefElementTypeInterface : TypeInterface<"MemRefElementTypeInterface"> {
 }
 
 //===----------------------------------------------------------------------===//
+// PtrLikeTypeInterface
+//===----------------------------------------------------------------------===//
+
+def PtrLikeTypeInterface : TypeInterface<"PtrLikeTypeInterface"> {
+  let cppNamespace = "::mlir";
+  let description = [{
+    A ptr-like type represents an object storing a memory address. This object
+    is constituted by:
+    - A memory address called the base pointer. This pointer is treated as a
+      bag of bits without any assumed structure. The bit-width of the base
+      pointer must be a compile-time constant. However, the bit-width may remain
+      opaque or unavailable during transformations that do not depend on the
+      base pointer. Finally, it is considered indivisible in the sense that as
+      a `PtrLikeTypeInterface` value, it has no metadata.
+    - Optional metadata about the pointer. For example, the size of the  memory
+      region associated with the pointer.
+
+    Furthermore, all ptr-like types have two properties:
+    - The memory space associated with the address held by the pointer.
+    - An optional element type. If the element type is not specified, the
+      pointer is considered opaque.
+  }];
+  let methods = [
+    InterfaceMethod<[{
+      Returns the memory space of this ptr-like type.
+    }],
+    "::mlir::Attribute", "getMemorySpace">,
+    InterfaceMethod<[{
+      Returns the element type of this ptr-like type. Note: this method can
+      return `::mlir::Type()`, in which case the pointer is considered opaque.
+    }],
+    "::mlir::Type", "getElementType">,
+    InterfaceMethod<[{
+      Returns whether this ptr-like type has non-empty metadata.
+    }],
+    "bool", "hasPtrMetadata">,
+    InterfaceMethod<[{
+      Returns a clone of this type with the given memory space and element type,
+      or `failure` if the type cannot be cloned with the specified arguments.
+      If the pointer is opaque and `elementType` is not `std::nullopt` the
+      method will return `failure`.
+
+      If no `elementType` is provided and ptr is not opaque, the `elementType`
+      of this type is used.
+    }],
+    "::llvm::FailureOr<::mlir::PtrLikeTypeInterface>", "clonePtrWith", (ins
+      "::mlir::Attribute":$memorySpace,
+      "::std::optional<::mlir::Type>":$elementType
+    )>
+  ];
+}
+
+//===----------------------------------------------------------------------===//
 // ShapedType
 //===----------------------------------------------------------------------===//
 
@@ -59,8 +181,13 @@ def ShapedTypeInterface : TypeInterface<"ShapedType"> {
   }];
   let methods = [
     InterfaceMethod<[{
-      Returns a clone of this type with the given shape and element
-      type. If a shape is not provided, the current shape of the type is used.
+      Returns a clone of this type with the given shape and element type.
+
+      If no shape is provided, the shape of this type is used. In that case, if
+      this type is unranked, so is the resulting type.
+
+      If a shape is provided, the resulting type is always ranked, even if this
+      type is unranked.
     }],
     "::mlir::ShapedType", "cloneWith", (ins
       "::std::optional<::llvm::ArrayRef<int64_t>>":$shape,
@@ -89,37 +216,44 @@ def ShapedTypeInterface : TypeInterface<"ShapedType"> {
 
     /// Whether the given dimension size indicates a dynamic dimension.
     static constexpr bool isDynamic(int64_t dValue) {
-	return dValue == kDynamic;
+      return dValue == kDynamic;
     }
 
     /// Whether the given shape has any size that indicates a dynamic dimension.
     static bool isDynamicShape(ArrayRef<int64_t> dSizes) {
-      return any_of(dSizes, [](int64_t dSize) { return isDynamic(dSize); });
+      return llvm::any_of(dSizes, isDynamic);
+    }
+
+    /// Whether the given dimension size indicates a statically-sized dimension.
+    static constexpr bool isStatic(int64_t dValue) {
+      return dValue != kDynamic;
+    }
+
+    /// Whether the given shape has static dimensions only.
+    static bool isStaticShape(ArrayRef<int64_t> dSizes) {
+      return llvm::all_of(dSizes, isStatic);
     }
 
     /// Return the number of elements present in the given shape.
     static int64_t getNumElements(ArrayRef<int64_t> shape);
 
-    /// Returns the total amount of bits occupied by a value of this type. This
-    /// does not take into account any memory layout or widening constraints,
-    /// e.g. a vector<3xi57> may report to occupy 3x57=171 bit, even though in
-    /// practice it will likely be stored as in a 4xi64 vector register. Fails
-    /// with an assertion if the size cannot be computed statically, e.g. if the
-    /// type has a dynamic shape or if its elemental type does not have a known
-    /// bit width.
-    int64_t getSizeInBits() const;
+    /// Return a clone of this type with the given new shape and element type.
+    /// The returned type is ranked, even if this type is unranked.
+    auto clone(::llvm::ArrayRef<int64_t> shape, Type elementType) {
+      return cloneWith(shape, elementType);
+    }
+
+    /// Return a clone of this type with the given new shape. The returned type
+    /// is ranked, even if this type is unranked.
+    auto clone(::llvm::ArrayRef<int64_t> shape) {
+      return cloneWith(shape, getElementType());
+    }
   }];
 
   let extraSharedClassDeclaration = [{
-    /// Return a clone of this type with the given new shape and element type.
-    auto clone(::llvm::ArrayRef<int64_t> shape, Type elementType) {
-      return $_type.cloneWith(shape, elementType);
-    }
-    /// Return a clone of this type with the given new shape.
-    auto clone(::llvm::ArrayRef<int64_t> shape) {
-      return $_type.cloneWith(shape, $_type.getElementType());
-    }
-    /// Return a clone of this type with the given new element type.
+    /// Return a clone of this type with the given new element type. The
+    /// returned type is ranked if and only if this type is ranked. In that
+    /// case, the returned type has the same shape as this type.
     auto clone(::mlir::Type elementType) {
       return $_type.cloneWith(/*shape=*/std::nullopt, elementType);
     }
@@ -149,11 +283,18 @@ def ShapedTypeInterface : TypeInterface<"ShapedType"> {
       return ::mlir::ShapedType::isDynamic($_type.getShape()[idx]);
     }
 
+    /// Returns true if this dimension has a static size (for ranked types);
+    /// aborts for unranked types.
+    bool isStaticDim(unsigned idx) const {
+      assert(idx < getRank() && "invalid index for shaped type");
+      return ::mlir::ShapedType::isStatic($_type.getShape()[idx]);
+    }
+
     /// Returns if this type has a static shape, i.e. if the type is ranked and
     /// all dimensions have known size (>= 0).
     bool hasStaticShape() const {
       return $_type.hasRank() &&
-             !::mlir::ShapedType::isDynamicShape($_type.getShape());
+             ::mlir::ShapedType::isStaticShape($_type.getShape());
     }
 
     /// Returns if this type has a static shape and the shape is equal to
@@ -164,7 +305,7 @@ def ShapedTypeInterface : TypeInterface<"ShapedType"> {
 
     /// If this is a ranked type, return the number of dimensions with dynamic
     /// size. Otherwise, abort.
-    int64_t getNumDynamicDims() const {
+    size_t getNumDynamicDims() const {
       return llvm::count_if($_type.getShape(), ::mlir::ShapedType::isDynamic);
     }
 

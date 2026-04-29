@@ -146,7 +146,7 @@ target triple = "x86_64-grtev4-linux-gnu"
   i32 trunc (i64 sub (i64 ptrtoint (ptr dso_local_equivalent @_ZN1D1mEi to i64), i64 ptrtoint (ptr getelementptr inbounds ({ [3 x i32] }, ptr @_ZTV1D_RV, i32 0, i32 0, i32 2) to i64)) to i32)
 ] }, !type !10
 
-; CHECK-IR-LABEL: define i32 @test
+; CHECK-IR-LABEL: define {{(noundef )?}}i32 @test
 define i32 @test(ptr %obj, ptr %obj2, i32 %a) {
 entry:
   %vtable = load ptr, ptr %obj
@@ -184,7 +184,7 @@ entry:
 
 declare ptr @llvm.load.relative.i32(ptr, i32)
 
-; CHECK-IR-LABEL: define i32 @test_rv
+; CHECK-IR-LABEL: define {{.*}}i32 @test_rv
 define i32 @test_rv(ptr %obj, ptr %obj2, i32 %a) {
 entry:
   %vtable = load ptr, ptr %obj

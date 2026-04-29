@@ -35,17 +35,21 @@
 # CHECK-NEXT:        "firstTriggerCharacter": "\n",
 # CHECK-NEXT:        "moreTriggerCharacter": []
 # CHECK-NEXT:      },
-# CHECK-NEXT:      "documentRangeFormattingProvider": true,
+# CHECK-NEXT:      "documentRangeFormattingProvider": {
+# CHECK-NEXT:        "rangesSupport": true
+# CHECK-NEXT:      },
 # CHECK-NEXT:      "documentSymbolProvider": true,
 # CHECK-NEXT:      "executeCommandProvider": {
 # CHECK-NEXT:        "commands": [
 # CHECK-NEXT:          "clangd.applyFix",
+# CHECK-NEXT:          "clangd.applyRename"
 # CHECK-NEXT:          "clangd.applyTweak"
 # CHECK-NEXT:        ]
 # CHECK-NEXT:      },
 # CHECK-NEXT:      "foldingRangeProvider": true,
 # CHECK-NEXT:      "hoverProvider": true,
 # CHECK-NEXT:      "implementationProvider": true,
+# CHECK-NEXT:      "inactiveRegionsProvider": true,
 # CHECK-NEXT:      "inlayHintProvider": true,
 # CHECK-NEXT:      "memoryUsageProvider": true,
 # CHECK-NEXT:      "referencesProvider": true,

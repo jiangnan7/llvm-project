@@ -1,6 +1,8 @@
 ; RUN: llc %s -stop-before finalize-isel -o - \
 ; RUN:    -experimental-debug-variable-locations=false \
+; RUN:    -debug-ata-coalesce-frags=true \
 ; RUN: | FileCheck %s --implicit-check-not=DBG_
+
 ; RUN: llc %s -stop-before finalize-isel -o - \
 ; RUN:    -experimental-debug-variable-locations=true \
 ; RUN: | FileCheck %s  --implicit-check-not=DBG_
@@ -50,7 +52,7 @@ entry:
   store i32 2, ptr %c, align 8, !dbg !25, !DIAssignID !31
 ; CHECK: MOV32mi %stack.0.nums, 1, $noreg, 8, $noreg, 2
   call void @llvm.dbg.assign(metadata i32 2, metadata !12, metadata !DIExpression(DW_OP_LLVM_fragment, 64, 32), metadata !31, metadata ptr %c, metadata !DIExpression()), !dbg !19
-; CHECK-NEXT: DBG_VALUE %stack.0.nums, $noreg, ![[nums]], !DIExpression(DW_OP_plus_uconst, 8, DW_OP_deref, DW_OP_LLVM_fragment, 64, 32)
+; CHECK-NEXT: DBG_VALUE %stack.0.nums, $noreg, ![[nums]], !DIExpression(DW_OP_deref)
   tail call void @_Z4stepv(), !dbg !32
 ;; Next dbg.assign added by hand to test that the bits [64, 32) have been
 ;; correctly tracked as in memory - we know this has worked if
@@ -66,10 +68,10 @@ entry:
   ret i32 0, !dbg !35
 }
 
-declare void @llvm.lifetime.start.p0i8(i64 immarg, ptr nocapture) #1
+declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture) #1
 declare !dbg !36 dso_local void @_Z4stepv() local_unnamed_addr #2
 declare !dbg !40 dso_local void @_Z3escP4Nums(ptr noundef) local_unnamed_addr #2
-declare void @llvm.lifetime.end.p0i8(i64 immarg, ptr nocapture) #1
+declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture) #1
 declare void @llvm.dbg.assign(metadata, metadata, metadata, metadata, metadata, metadata) #3
 
 !llvm.dbg.cu = !{!0}

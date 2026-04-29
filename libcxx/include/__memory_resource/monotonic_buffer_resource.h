@@ -10,9 +10,9 @@
 #define _LIBCPP___MEMORY_RESOURCE_MONOTONIC_BUFFER_RESOURCE_H
 
 #include <__config>
+#include <__cstddef/size_t.h>
 #include <__memory/addressof.h>
 #include <__memory_resource/memory_resource.h>
-#include <cstddef>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -26,17 +26,17 @@ namespace pmr {
 
 // [mem.res.monotonic.buffer]
 
-class _LIBCPP_TYPE_VIS monotonic_buffer_resource : public memory_resource {
-  static const size_t __default_buffer_capacity  = 1024;
-  static const size_t __default_buffer_alignment = 16;
+class _LIBCPP_AVAILABILITY_PMR _LIBCPP_EXPORTED_FROM_ABI monotonic_buffer_resource : public memory_resource {
+  static constexpr size_t __default_buffer_capacity = 1024;
 
   struct __chunk_footer {
     __chunk_footer* __next_;
     char* __start_;
     char* __cur_;
     size_t __align_;
-    size_t __allocation_size() { return (reinterpret_cast<char*>(this) - __start_) + sizeof(*this); }
-    void* __try_allocate_from_chunk(size_t, size_t);
+    _LIBCPP_HIDE_FROM_ABI size_t __allocation_size() {
+      return (reinterpret_cast<char*>(this) - __start_) + sizeof(*this);
+    }
   };
 
   struct __initial_descriptor {
@@ -46,7 +46,6 @@ class _LIBCPP_TYPE_VIS monotonic_buffer_resource : public memory_resource {
       char* __end_;
       size_t __size_;
     };
-    void* __try_allocate_from_chunk(size_t, size_t);
   };
 
 public:

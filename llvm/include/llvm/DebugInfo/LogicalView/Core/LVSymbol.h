@@ -15,6 +15,7 @@
 #define LLVM_DEBUGINFO_LOGICALVIEW_CORE_LVSYMBOL_H
 
 #include "llvm/DebugInfo/LogicalView/Core/LVElement.h"
+#include "llvm/Support/Compiler.h"
 
 namespace llvm {
 namespace logicalview {
@@ -33,7 +34,7 @@ using LVSymbolKindSet = std::set<LVSymbolKind>;
 using LVSymbolDispatch = std::map<LVSymbolKind, LVSymbolGetFunction>;
 using LVSymbolRequest = std::vector<LVSymbolGetFunction>;
 
-class LVSymbol final : public LVElement {
+class LLVM_ABI LVSymbol final : public LVElement {
   enum class Property { HasLocation, FillGaps, LastEntry };
 
   // Typed bitvector with kinds and properties for this symbol.
@@ -126,8 +127,7 @@ public:
   // Add a Location Entry.
   void addLocationConstant(dwarf::Attribute Attr, LVUnsigned Constant,
                            uint64_t LocDescOffset);
-  void addLocationOperands(LVSmall Opcode, uint64_t Operand1,
-                           uint64_t Operand2);
+  void addLocationOperands(LVSmall Opcode, ArrayRef<uint64_t> Operands);
   void addLocation(dwarf::Attribute Attr, LVAddress LowPC, LVAddress HighPC,
                    LVUnsigned SectionOffset, uint64_t LocDescOffset,
                    bool CallSiteLocation = false);
@@ -183,10 +183,6 @@ public:
 
   void print(raw_ostream &OS, bool Full = true) const override;
   void printExtra(raw_ostream &OS, bool Full = true) const override;
-
-#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-  void dump() const override { print(dbgs()); }
-#endif
 };
 
 } // end namespace logicalview

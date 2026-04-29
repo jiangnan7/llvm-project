@@ -16,18 +16,16 @@ class TestCase(TestBase):
         self.ci.HandleCommand(cmd, result)
         return result.GetOutput().rstrip()
 
-    VAR_IDENT_RAW = r"(?:\$\d+|\w+) = "
-    VAR_IDENT = re.compile(VAR_IDENT_RAW)
+    VAR_IDENT = re.compile(r"(?:\$\d+|[\w.]+) = ")
 
-    def _mask_persistent_var(self, string: str) -> str:
+    def _strip_result_var(self, string: str) -> str:
         """
-        Replace persistent result variables (ex '$0', '$1', etc) with a regex
-        that matches any persistent result (r'\$\d+'). The returned string can
-        be matched against other `expression` results.
+        Strip (persistent) result variables (ex '$0 = ', or 'someVar = ', etc).
+
+        This allows for using the output of `expression`/`frame variable`, to
+        compare it to `dwim-print` output, which disables result variables.
         """
-        before, after = self.VAR_IDENT.split(string, maxsplit=1)
-        # Support either a frame variable (\w+) or a persistent result (\$\d+).
-        return re.escape(before) + self.VAR_IDENT_RAW + re.escape(after)
+        return self.VAR_IDENT.subn("", string, 1)[0]
 
     def _expect_cmd(
         self,
@@ -46,19 +44,19 @@ class TestCase(TestBase):
         if actual_cmd == "frame variable":
             resolved_cmd = resolved_cmd.replace(" -- ", " ", 1)
 
-        expected_output = self._run_cmd(resolved_cmd)
+        resolved_cmd_output = self._run_cmd(resolved_cmd)
+        dwim_cmd_output = self._strip_result_var(resolved_cmd_output)
 
         # Verify dwim-print chose the expected command.
         self.runCmd("settings set dwim-print-verbosity full")
-        substrs = [f"note: ran `{resolved_cmd}`"]
-        patterns = []
 
-        if self.VAR_IDENT.search(expected_output):
-            patterns.append(self._mask_persistent_var(expected_output))
-        else:
-            substrs.append(expected_output)
-
-        self.expect(dwim_cmd, substrs=substrs, patterns=patterns)
+        self.expect(
+            dwim_cmd,
+            substrs=[
+                f"note: ran `{resolved_cmd}`",
+                dwim_cmd_output,
+            ],
+        )
 
     def test_variables(self):
         """Test dwim-print with variables."""
@@ -112,3 +110,78 @@ class TestCase(TestBase):
         lldbutil.run_to_name_breakpoint(self, "main")
         self._expect_cmd(f"dwim-print -l c++ -- argc", "frame variable")
         self._expect_cmd(f"dwim-print -l c++ -- argc + 1", "expression")
+
+    def test_empty_expression(self):
+        self.build()
+        lldbutil.run_to_name_breakpoint(self, "main")
+        error_msg = "error: 'dwim-print' takes a variable or expression"
+        self.expect(f"dwim-print", error=True, startstr=error_msg)
+        self.expect(f"dwim-print -- ", error=True, startstr=error_msg)
+
+    def test_nested_values(self):
+        """Test dwim-print with nested values (structs, etc)."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.runCmd("settings set auto-one-line-summaries false")
+        self._expect_cmd(f"dwim-print s", "frame variable")
+        self._expect_cmd(f"dwim-print (struct Structure)s", "expression")
+
+    def test_summary_strings(self):
+        """Test dwim-print with type summaries."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.runCmd("settings set auto-one-line-summaries false")
+        self.runCmd("type summary add -e -s 'stub summary' Structure")
+        self._expect_cmd(f"dwim-print s", "frame variable")
+        self._expect_cmd(f"dwim-print (struct Structure)s", "expression")
+        self.runCmd("type summary delete Structure")
+
+    def test_void_result(self):
+        """Test dwim-print does not surface an error message for void expressions."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.expect("dwim-print (void)15", matching=False, patterns=["(?i)error"])
+
+    def test_preserves_persistent_variables(self):
+        """Test dwim-print does not delete persistent variables."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.expect("dwim-print int $i = 15")
+        # Run the same expression twice and verify success. This ensures the
+        # first command does not delete the persistent variable.
+        for _ in range(2):
+            self.expect("dwim-print $i", startstr="(int) 15")
+
+    def test_missing_type(self):
+        """The expected output of po opaque is its address (no error)"""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.expect("dwim-print -O -- opaque", substrs=["0x"])
+
+    def test_variable_expression_path(self):
+        """Test dwim-print supports certain variable expression paths."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec("main.cpp")
+        )
+        self.runCmd("settings set auto-one-line-summaries false")
+        self._expect_cmd("dwim-print w.s", "frame variable")
+        self._expect_cmd("dwim-print wp->s", "expression")
+
+    def test_direct_child_access(self):
+        """Test dwim-print supports accessing members/ivars without qualification."""
+        self.build()
+        lldbutil.run_to_source_breakpoint(
+            self, "break inside", lldb.SBFileSpec("main.cpp")
+        )
+        self._expect_cmd("dwim-print number", "frame variable")

@@ -1,4 +1,4 @@
-add_libc_testsuite(libc_sys_select_unittests)
+add_custom_target(libc_sys_select_unittests)
 
 add_libc_unittest(
   select_ui_test
@@ -8,10 +8,12 @@ add_libc_unittest(
   SRCS
     select_ui_test.cpp
   DEPENDS
-    libc.include.errno
     libc.include.unistd
+    libc.src.errno.errno
     libc.src.sys.select.select
     libc.src.unistd.read
+    libc.test.UnitTest.ErrnoCheckingTest
+    libc.test.UnitTest.ErrnoSetterMatcher
 )
 
 add_libc_unittest(
@@ -21,11 +23,12 @@ add_libc_unittest(
   SRCS
     select_failure_test.cpp
   DEPENDS
-    libc.include.errno
     libc.include.unistd
+    libc.src.errno.errno
     libc.src.sys.select.select
     libc.src.unistd.read
-    libc.test.errno_setter_matcher
+    libc.test.UnitTest.ErrnoCheckingTest
+    libc.test.UnitTest.ErrnoSetterMatcher
 )
 
 add_subdirectory(testdata)

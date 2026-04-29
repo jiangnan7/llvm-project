@@ -17,6 +17,8 @@ Just Tell Me How To Run The Default Optimization Pipeline With The New Pass Mana
 .. code-block:: c++
 
   // Create the analysis managers.
+  // These must be declared in this order so that they are destroyed in the
+  // correct order due to inter-analysis-manager references.
   LoopAnalysisManager LAM;
   FunctionAnalysisManager FAM;
   CGSCCAnalysisManager CGAM;
@@ -160,10 +162,10 @@ certain parts of the pipeline. For example,
 .. code-block:: c++
 
   PassBuilder PB;
-  PB.registerPipelineStartEPCallback([&](ModulePassManager &MPM,
-                                         PassBuilder::OptimizationLevel Level) {
-      MPM.addPass(FooPass());
-  };
+  PB.registerPipelineStartEPCallback(
+      [&](ModulePassManager &MPM, PassBuilder::OptimizationLevel Level) {
+        MPM.addPass(FooPass());
+      });
 
 will add ``FooPass`` near the very beginning of the pipeline for pass
 managers created by that ``PassBuilder``. See the documentation for
@@ -419,17 +421,6 @@ for more details.
 
 Invoking ``opt``
 ================
-
-To use the legacy pass manager:
-
-.. code-block:: shell
-
-  $ opt -enable-new-pm=0 -pass1 -pass2 /tmp/a.ll -S
-
-This will be removed once the legacy pass manager is deprecated and removed for
-the optimization pipeline.
-
-To use the new PM:
 
 .. code-block:: shell
 

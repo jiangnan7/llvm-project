@@ -15,7 +15,7 @@
 
 #include "MipsISelLowering.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
-#include "llvm/Support/MachineValueType.h"
+#include "llvm/CodeGenTypes/MachineValueType.h"
 
 namespace llvm {
 
@@ -44,6 +44,9 @@ class TargetRegisterClass;
         EVT VT, unsigned AS = 0, Align Alignment = Align(1),
         MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
         unsigned *Fast = nullptr) const override;
+
+    TargetLoweringBase::LegalizeTypeAction
+    getPreferredVectorAction(MVT VT) const override;
 
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
 

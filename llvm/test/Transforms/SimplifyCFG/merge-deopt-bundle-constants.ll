@@ -7,15 +7,22 @@ target triple = "x86_64-unknown-linux-gnu"
 define void @test_01(i1 %cond) gc "statepoint-example" personality ptr @zot {
 ; CHECK-LABEL: @test_01(
 ; CHECK-NEXT:  bb:
-; CHECK-NEXT:    [[DOT:%.*]] = select i1 [[COND:%.*]], i32 0, i32 1
+; CHECK-NEXT:    br i1 [[COND:%.*]], label [[BB3:%.*]], label [[BB8:%.*]]
+; CHECK:       bb3:
 ; CHECK-NEXT:    [[TMP4:%.*]] = call ptr @wibble()
-; CHECK-NEXT:    [[TMP0:%.*]] = invoke align 8 dereferenceable_or_null(8) ptr addrspace(1) [[TMP4]](ptr addrspace(1) undef) [ "deopt"(i32 [[DOT]]) ]
-; CHECK-NEXT:    to label [[BB8_CONT:%.*]] unwind label [[BB13:%.*]]
-; CHECK:       bb8.cont:
+; CHECK-NEXT:    [[TMP6:%.*]] = invoke align 8 dereferenceable_or_null(8) ptr addrspace(1) [[TMP4]](ptr addrspace(1) undef) [ "deopt"(i32 0) ]
+; CHECK-NEXT:            to label [[BB7:%.*]] unwind label [[BB13:%.*]]
+; CHECK:       bb7:
+; CHECK-NEXT:    unreachable
+; CHECK:       bb8:
+; CHECK-NEXT:    [[TMP9:%.*]] = call ptr @wibble()
+; CHECK-NEXT:    [[TMP11:%.*]] = invoke align 8 dereferenceable_or_null(8) ptr addrspace(1) [[TMP9]](ptr addrspace(1) undef) [ "deopt"(i32 1) ]
+; CHECK-NEXT:            to label [[BB12:%.*]] unwind label [[BB13]]
+; CHECK:       bb12:
 ; CHECK-NEXT:    unreachable
 ; CHECK:       bb13:
 ; CHECK-NEXT:    [[TMP14:%.*]] = landingpad { ptr, i32 }
-; CHECK-NEXT:    cleanup
+; CHECK-NEXT:            cleanup
 ; CHECK-NEXT:    ret void
 ;
 bb:
@@ -51,12 +58,12 @@ define void @test_02(i1 %cond) gc "statepoint-example" personality ptr @zot {
 ; CHECK-NEXT:  bb:
 ; CHECK-NEXT:    [[TMP4:%.*]] = call ptr @wibble()
 ; CHECK-NEXT:    [[TMP0:%.*]] = invoke align 8 dereferenceable_or_null(8) ptr addrspace(1) [[TMP4]](ptr addrspace(1) undef) [ "deopt"(i32 0) ]
-; CHECK-NEXT:    to label [[BB8_CONT:%.*]] unwind label [[BB13:%.*]]
+; CHECK-NEXT:            to label [[BB8_CONT:%.*]] unwind label [[BB13:%.*]]
 ; CHECK:       bb8.cont:
 ; CHECK-NEXT:    unreachable
 ; CHECK:       bb13:
 ; CHECK-NEXT:    [[TMP14:%.*]] = landingpad { ptr, i32 }
-; CHECK-NEXT:    cleanup
+; CHECK-NEXT:            cleanup
 ; CHECK-NEXT:    ret void
 ;
 bb:

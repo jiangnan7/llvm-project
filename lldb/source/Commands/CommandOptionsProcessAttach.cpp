@@ -41,8 +41,8 @@ Status CommandOptionsProcessAttach::SetOptionValue(
   case 'p': {
     lldb::pid_t pid;
     if (option_arg.getAsInteger(0, pid)) {
-      error.SetErrorStringWithFormat("invalid process ID '%s'",
-                                     option_arg.str().c_str());
+      return Status::FromErrorStringWithFormatv("invalid process ID '{0}'",
+                                                option_arg);
     } else {
       attach_info.SetProcessID(pid);
     }
@@ -72,5 +72,5 @@ Status CommandOptionsProcessAttach::SetOptionValue(
 }
 
 llvm::ArrayRef<OptionDefinition> CommandOptionsProcessAttach::GetDefinitions() {
-  return llvm::makeArrayRef(g_process_attach_options);
+  return llvm::ArrayRef(g_process_attach_options);
 }

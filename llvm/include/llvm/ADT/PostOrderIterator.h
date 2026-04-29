@@ -23,8 +23,8 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
 namespace llvm {
 
@@ -96,23 +96,27 @@ template <class GraphT,
           bool ExtStorage = false, class GT = GraphTraits<GraphT>>
 class po_iterator : public po_iterator_storage<SetType, ExtStorage> {
 public:
-  using iterator_category = std::forward_iterator_tag;
+  // When External storage is used we are not multi-pass safe.
+  using iterator_category =
+      std::conditional_t<ExtStorage, std::input_iterator_tag,
+                         std::forward_iterator_tag>;
   using value_type = typename GT::NodeRef;
   using difference_type = std::ptrdiff_t;
   using pointer = value_type *;
-  using reference = value_type &;
+  using reference = const value_type &;
 
 private:
   using NodeRef = typename GT::NodeRef;
   using ChildItTy = typename GT::ChildIteratorType;
 
-  // VisitStack - Used to maintain the ordering.  Top = current block
-  // First element is basic block pointer, second is the 'next child' to visit
-  SmallVector<std::pair<NodeRef, ChildItTy>, 8> VisitStack;
+  /// Used to maintain the ordering.
+  /// First element is basic block pointer, second is iterator for the next
+  /// child to visit, third is the end iterator.
+  SmallVector<std::tuple<NodeRef, ChildItTy, ChildItTy>, 8> VisitStack;
 
   po_iterator(NodeRef BB) {
     this->insertEdge(std::optional<NodeRef>(), BB);
-    VisitStack.push_back(std::make_pair(BB, GT::child_begin(BB)));
+    VisitStack.emplace_back(BB, GT::child_begin(BB), GT::child_end(BB));
     traverseChild();
   }
 
@@ -121,7 +125,7 @@ private:
   po_iterator(NodeRef BB, SetType &S)
       : po_iterator_storage<SetType, ExtStorage>(S) {
     if (this->insertEdge(std::optional<NodeRef>(), BB)) {
-      VisitStack.push_back(std::make_pair(BB, GT::child_begin(BB)));
+      VisitStack.emplace_back(BB, GT::child_begin(BB), GT::child_end(BB));
       traverseChild();
     }
   }
@@ -131,12 +135,14 @@ private:
   } // End is when stack is empty.
 
   void traverseChild() {
-    while (VisitStack.back().second != GT::child_end(VisitStack.back().first)) {
-      NodeRef BB = *VisitStack.back().second++;
-      if (this->insertEdge(std::optional<NodeRef>(VisitStack.back().first),
-                           BB)) {
+    while (true) {
+      auto &Entry = VisitStack.back();
+      if (std::get<1>(Entry) == std::get<2>(Entry))
+        break;
+      NodeRef BB = *std::get<1>(Entry)++;
+      if (this->insertEdge(std::optional<NodeRef>(std::get<0>(Entry)), BB)) {
         // If the block is not visited...
-        VisitStack.push_back(std::make_pair(BB, GT::child_begin(BB)));
+        VisitStack.emplace_back(BB, GT::child_begin(BB), GT::child_end(BB));
       }
     }
   }
@@ -158,7 +164,7 @@ public:
   }
   bool operator!=(const po_iterator &x) const { return !(*this == x); }
 
-  const NodeRef &operator*() const { return VisitStack.back().first; }
+  reference operator*() const { return std::get<0>(VisitStack.back()); }
 
   // This is a nonstandard operator-> that dereferences the pointer an extra
   // time... so that you can actually call methods ON the BasicBlock, because
@@ -167,7 +173,7 @@ public:
   NodeRef operator->() const { return **this; }
 
   po_iterator &operator++() { // Preincrement
-    this->finishPostorder(VisitStack.back().first);
+    this->finishPostorder(std::get<0>(VisitStack.back()));
     VisitStack.pop_back();
     if (!VisitStack.empty())
       traverseChild();
@@ -293,23 +299,24 @@ template<class GraphT, class GT = GraphTraits<GraphT>>
 class ReversePostOrderTraversal {
   using NodeRef = typename GT::NodeRef;
 
-  std::vector<NodeRef> Blocks; // Block list in normal PO order
+  using VecTy = SmallVector<NodeRef, 8>;
+  VecTy Blocks; // Block list in normal PO order
 
   void Initialize(const GraphT &G) {
     std::copy(po_begin(G), po_end(G), std::back_inserter(Blocks));
   }
 
 public:
-  using rpo_iterator = typename std::vector<NodeRef>::reverse_iterator;
-  using const_rpo_iterator = typename std::vector<NodeRef>::const_reverse_iterator;
+  using rpo_iterator = typename VecTy::reverse_iterator;
+  using const_rpo_iterator = typename VecTy::const_reverse_iterator;
 
   ReversePostOrderTraversal(const GraphT &G) { Initialize(G); }
 
   // Because we want a reverse post order, use reverse iterators from the vector
   rpo_iterator begin() { return Blocks.rbegin(); }
-  const_rpo_iterator begin() const { return Blocks.crbegin(); }
+  const_rpo_iterator begin() const { return Blocks.rbegin(); }
   rpo_iterator end() { return Blocks.rend(); }
-  const_rpo_iterator end() const { return Blocks.crend(); }
+  const_rpo_iterator end() const { return Blocks.rend(); }
 };
 
 } // end namespace llvm

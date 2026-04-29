@@ -13,7 +13,6 @@
 #include "llvm/Transforms/IPO/ExtractGV.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
-#include <algorithm>
 
 using namespace llvm;
 
@@ -36,7 +35,7 @@ static void makeVisible(GlobalValue &GV, bool Delete) {
   }
 
   // Map linkonce* to weak* so that llvm doesn't drop this GV.
-  switch(GV.getLinkage()) {
+  switch (GV.getLinkage()) {
   default:
     llvm_unreachable("Unexpected linkage");
   case GlobalValue::LinkOnceAnyLinkage:
@@ -48,13 +47,12 @@ static void makeVisible(GlobalValue &GV, bool Delete) {
   }
 }
 
-
-    /// If deleteS is true, this pass deletes the specified global values.
-    /// Otherwise, it deletes as much of the module as possible, except for the
-    /// global values specified.
+/// If deleteS is true, this pass deletes the specified global values.
+/// Otherwise, it deletes as much of the module as possible, except for the
+/// global values specified.
 ExtractGVPass::ExtractGVPass(std::vector<GlobalValue *> &GVs, bool deleteS,
                              bool keepConstInit)
-    : Named(GVs.begin(), GVs.end()), deleteStuff(deleteS),
+    : Named(llvm::from_range, GVs), deleteStuff(deleteS),
       keepConstInit(keepConstInit) {}
 
 PreservedAnalyses ExtractGVPass::run(Module &M, ModuleAnalysisManager &) {
@@ -127,6 +125,23 @@ PreservedAnalyses ExtractGVPass::run(Module &M, ModuleAnalysisManager &) {
       GA.replaceAllUsesWith(Declaration);
       delete &GA;
     }
+  }
+
+  // Visit the IFuncs.
+  for (GlobalIFunc &IF : llvm::make_early_inc_range(M.ifuncs())) {
+    bool Delete = deleteStuff == (bool)Named.count(&IF);
+    makeVisible(IF, Delete);
+
+    if (!Delete)
+      continue;
+
+    auto *FuncType = dyn_cast<FunctionType>(IF.getValueType());
+    IF.removeFromParent();
+    llvm::Value *Declaration =
+        Function::Create(FuncType, GlobalValue::ExternalLinkage,
+                         IF.getAddressSpace(), IF.getName(), &M);
+    IF.replaceAllUsesWith(Declaration);
+    delete &IF;
   }
 
   return PreservedAnalyses::none();

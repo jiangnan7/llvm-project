@@ -8,11 +8,12 @@ add_mlir_conversion_library(MLIRGPUToSPIRV
 
   LINK_LIBS PUBLIC
   MLIRArithToSPIRV
-  MLIRGPUOps
+  MLIRGPUDialect
   MLIRFuncToSPIRV
   MLIRIR
   MLIRPass
   MLIRSCFToSPIRV
+  MLIRVectorToSPIRV
   MLIRSPIRVDialect
   MLIRSPIRVConversion
   MLIRSupport

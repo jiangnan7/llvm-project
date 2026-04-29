@@ -22,6 +22,22 @@ using testing::ElementsAre;
 
 namespace {
 
+namespace adl_test {
+struct WithFreeBeginEnd {
+  int data[3] = {21, 22, 23};
+};
+
+auto begin(const WithFreeBeginEnd &X) { return std::begin(X.data); }
+auto end(const WithFreeBeginEnd &X) { return std::end(X.data); }
+
+struct WithFreeRBeginREnd {
+  int data[3] = {42, 43, 44};
+};
+
+auto rbegin(const WithFreeRBeginREnd &X) { return std::rbegin(X.data); }
+auto rend(const WithFreeRBeginREnd &X) { return std::rend(X.data); }
+} // namespace adl_test
+
 template <int> struct Shadow;
 
 struct WeirdIter
@@ -274,7 +290,7 @@ TEST(FilterIteratorTest, Enumerate) {
   int A[] = {0, 1, 2, 3, 4, 5, 6};
   auto Enumerate = llvm::enumerate(A);
   SmallVector<int> Actual;
-  for (auto IndexedValue : make_filter_range(Enumerate, IsOdd))
+  for (const auto &IndexedValue : make_filter_range(Enumerate, IsOdd))
     Actual.push_back(IndexedValue.value());
   EXPECT_EQ((SmallVector<int, 3>{1, 3, 5}), Actual);
 }
@@ -364,6 +380,14 @@ TEST(FilterIteratorTest, ReverseFilterRange) {
   EXPECT_EQ((SmallVector<int, 4>{6, 4, 2, 0}), Actual4);
 }
 
+TEST(FilterIteratorTest, ADL) {
+  // Make sure that we use the `begin`/`end` functions
+  // from `adl_test`, using ADL.
+  adl_test::WithFreeBeginEnd R;
+  auto IsOdd = [](int N) { return N % 2 != 0; };
+  EXPECT_THAT(make_filter_range(R, IsOdd), ElementsAre(21, 23));
+}
+
 TEST(PointerIterator, Basic) {
   int A[] = {1, 2, 3, 4};
   pointer_iterator<int *> Begin(std::begin(A)), End(std::end(A));
@@ -393,6 +417,12 @@ TEST(PointerIterator, Range) {
   int I = 0;
   for (int *P : make_pointer_range(A))
     EXPECT_EQ(A + I++, P);
+}
+
+TEST(ReverseTest, ADL) {
+  // Check that we can find the rbegin/rend functions via ADL.
+  adl_test::WithFreeRBeginREnd Foo;
+  EXPECT_THAT(reverse(Foo), ElementsAre(44, 43, 42));
 }
 
 TEST(ZipIteratorTest, Basic) {
@@ -743,4 +773,65 @@ TEST(RangeTest, Distance) {
   EXPECT_EQ(std::distance(v2.begin(), v2.end()), size(v2));
 }
 
+TEST(RangeSizeTest, CommonRangeTypes) {
+  SmallVector<int> v1 = {1, 2, 3};
+  EXPECT_EQ(range_size(v1), 3u);
+
+  std::map<int, int> m1 = {{1, 1}, {2, 2}};
+  EXPECT_EQ(range_size(m1), 2u);
+
+  auto it_range = llvm::make_range(m1.begin(), m1.end());
+  EXPECT_EQ(range_size(it_range), 2u);
+
+  static constexpr int c_arr[5] = {};
+  static_assert(range_size(c_arr) == 5u);
+
+  static constexpr std::array<int, 6> cpp_arr = {};
+  static_assert(range_size(cpp_arr) == 6u);
+}
+
+struct FooWithMemberSize {
+  size_t size() const { return 42; }
+  auto begin() { return Data.begin(); }
+  auto end() { return Data.end(); }
+
+  std::set<int> Data;
+};
+
+TEST(RangeSizeTest, MemberSize) {
+  // Make sure that member `.size()` is preferred over the free fuction and
+  // `std::distance`.
+  FooWithMemberSize container;
+  EXPECT_EQ(range_size(container), 42u);
+}
+
+struct FooWithFreeSize {
+  friend size_t size(const FooWithFreeSize &) { return 13; }
+  auto begin() { return Data.begin(); }
+  auto end() { return Data.end(); }
+
+  std::set<int> Data;
+};
+
+TEST(RangeSizeTest, FreeSize) {
+  // Make sure that `size(x)` is preferred over `std::distance`.
+  FooWithFreeSize container;
+  EXPECT_EQ(range_size(container), 13u);
+}
+
+struct FooWithDistance {
+  auto begin() { return Data.begin(); }
+  auto end() { return Data.end(); }
+
+  std::set<int> Data;
+};
+
+TEST(RangeSizeTest, Distance) {
+  // Make sure that we can fall back to `std::distance` even the iterator is not
+  // random-access.
+  FooWithDistance container;
+  EXPECT_EQ(range_size(container), 0u);
+  container.Data = {1, 2, 3, 4};
+  EXPECT_EQ(range_size(container), 4u);
+}
 } // anonymous namespace

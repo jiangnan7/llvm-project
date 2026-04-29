@@ -8,21 +8,20 @@
 
 #include "lldb/DataFormatters/DumpValueObjectOptions.h"
 
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 
 using namespace lldb;
 using namespace lldb_private;
 
 DumpValueObjectOptions::DumpValueObjectOptions()
-    : m_summary_sp(), m_root_valobj_name(),
-      m_max_ptr_depth(PointerDepth{PointerDepth::Mode::Default, 0}),
-      m_decl_printing_helper(), m_pointer_as_array(), m_use_synthetic(true),
+    : m_summary_sp(), m_root_valobj_name(), m_decl_printing_helper(),
+      m_child_printing_decider(), m_pointer_as_array(), m_use_synthetic(true),
       m_scope_already_checked(false), m_flat_output(false), m_ignore_cap(false),
       m_show_types(false), m_show_location(false), m_use_objc(false),
-      m_hide_root_type(false), m_hide_name(false), m_hide_value(false),
-      m_run_validator(false), m_use_type_display_name(true),
-      m_allow_oneliner_mode(true), m_hide_pointer_value(false),
-      m_reveal_empty_aggregates(true) {}
+      m_hide_root_type(false), m_hide_root_name(false), m_hide_name(false),
+      m_hide_value(false), m_run_validator(false),
+      m_use_type_display_name(true), m_allow_oneliner_mode(true),
+      m_hide_pointer_value(false), m_reveal_empty_aggregates(true) {}
 
 DumpValueObjectOptions::DumpValueObjectOptions(ValueObject &valobj)
     : DumpValueObjectOptions() {
@@ -32,8 +31,8 @@ DumpValueObjectOptions::DumpValueObjectOptions(ValueObject &valobj)
 }
 
 DumpValueObjectOptions &
-DumpValueObjectOptions::SetMaximumPointerDepth(PointerDepth depth) {
-  m_max_ptr_depth = depth;
+DumpValueObjectOptions::SetMaximumPointerDepth(uint32_t depth) {
+  m_max_ptr_depth = {depth};
   return *this;
 }
 
@@ -47,6 +46,12 @@ DumpValueObjectOptions::SetMaximumDepth(uint32_t depth, bool is_default) {
 DumpValueObjectOptions &
 DumpValueObjectOptions::SetDeclPrintingHelper(DeclPrintingHelper helper) {
   m_decl_printing_helper = helper;
+  return *this;
+}
+
+DumpValueObjectOptions &
+DumpValueObjectOptions::SetChildPrintingDecider(ChildPrintingDecider decider) {
+  m_child_printing_decider = decider;
   return *this;
 }
 
@@ -143,6 +148,12 @@ DumpValueObjectOptions::SetHideRootType(bool hide_root_type) {
   return *this;
 }
 
+DumpValueObjectOptions &
+DumpValueObjectOptions::SetHideRootName(bool hide_root_name) {
+  m_hide_root_name = hide_root_name;
+  return *this;
+}
+
 DumpValueObjectOptions &DumpValueObjectOptions::SetHideName(bool hide_name) {
   m_hide_name = hide_name;
   return *this;
@@ -185,6 +196,12 @@ DumpValueObjectOptions::SetAllowOnelinerMode(bool oneliner) {
 DumpValueObjectOptions &
 DumpValueObjectOptions::SetRevealEmptyAggregates(bool reveal) {
   m_reveal_empty_aggregates = reveal;
+  return *this;
+}
+
+DumpValueObjectOptions &
+DumpValueObjectOptions::SetExpandPointerTypeFlags(unsigned flags) {
+  m_expand_ptr_type_flags = flags;
   return *this;
 }
 

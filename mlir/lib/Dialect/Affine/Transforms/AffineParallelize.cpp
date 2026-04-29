@@ -27,18 +27,23 @@
 #include <deque>
 
 namespace mlir {
+namespace affine {
 #define GEN_PASS_DEF_AFFINEPARALLELIZE
 #include "mlir/Dialect/Affine/Passes.h.inc"
+} // namespace affine
 } // namespace mlir
 
 #define DEBUG_TYPE "affine-parallel"
 
 using namespace mlir;
+using namespace mlir::affine;
 
 namespace {
 /// Convert all parallel affine.for op into 1-D affine.parallel op.
 struct AffineParallelize
-    : public impl::AffineParallelizeBase<AffineParallelize> {
+    : public affine::impl::AffineParallelizeBase<AffineParallelize> {
+  using AffineParallelizeBase<AffineParallelize>::AffineParallelizeBase;
+
   void runOnOperation() override;
 };
 
@@ -86,9 +91,4 @@ void AffineParallelize::runOnOperation() {
                               << loop);
     }
   }
-}
-
-std::unique_ptr<OperationPass<func::FuncOp>>
-mlir::createAffineParallelizePass() {
-  return std::make_unique<AffineParallelize>();
 }

@@ -24,8 +24,11 @@
 #include "mlir/IR/DialectInterface.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/Support/TypeID.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <optional>
 
 namespace mlir {
 class AsmParser;
@@ -35,7 +38,6 @@ class DynamicType;
 class ExtensibleDialect;
 class MLIRContext;
 class OptionalParseResult;
-class ParseResult;
 
 namespace detail {
 struct DynamicAttrStorage;
@@ -147,7 +149,7 @@ class IsDynamicAttr : public TraitBase<ConcreteType, IsDynamicAttr> {};
 /// A dynamic attribute instance. This is an attribute whose definition is
 /// defined at runtime.
 /// It is possible to check if an attribute is a dynamic attribute using
-/// `my_attr.isa<DynamicAttr>()`, and getting the attribute definition of a
+/// `isa<DynamicAttr>(myAttr)`, and getting the attribute definition of a
 /// dynamic attribute using the `DynamicAttr::getAttrDef` method.
 /// All dynamic attributes have the same storage, which is an array of
 /// attributes.
@@ -304,7 +306,7 @@ class IsDynamicType : public TypeTrait::TraitBase<ConcreteType, IsDynamicType> {
 /// A dynamic type instance. This is a type whose definition is defined at
 /// runtime.
 /// It is possible to check if a type is a dynamic type using
-/// `my_type.isa<DynamicType>()`, and getting the type definition of a dynamic
+/// `isa<DynamicType>(myType)`, and getting the type definition of a dynamic
 /// type using the `DynamicType::getTypeDef` method.
 /// All dynamic types have the same storage, which is an array of attributes.
 class DynamicType
@@ -462,6 +464,39 @@ public:
     return verifyRegionFn(op);
   }
 
+  /// Implementation for properties (unsupported right now here).
+  std::optional<Attribute> getInherentAttr(Operation *op,
+                                           StringRef name) final {
+    llvm::report_fatal_error("Unsupported getInherentAttr on Dynamic dialects");
+  }
+  void setInherentAttr(Operation *op, StringAttr name, Attribute value) final {
+    llvm::report_fatal_error("Unsupported setInherentAttr on Dynamic dialects");
+  }
+  void populateInherentAttrs(Operation *op, NamedAttrList &attrs) final {}
+  LogicalResult
+  verifyInherentAttrs(OperationName opName, NamedAttrList &attributes,
+                      function_ref<InFlightDiagnostic()> emitError) final {
+    return success();
+  }
+  int getOpPropertyByteSize() final { return 0; }
+  void initProperties(OperationName opName, OpaqueProperties storage,
+                      OpaqueProperties init) final {}
+  void deleteProperties(OpaqueProperties prop) final {}
+  void populateDefaultProperties(OperationName opName,
+                                 OpaqueProperties properties) final {}
+
+  LogicalResult
+  setPropertiesFromAttr(OperationName opName, OpaqueProperties properties,
+                        Attribute attr,
+                        function_ref<InFlightDiagnostic()> emitError) final {
+    emitError() << "extensible Dialects don't support properties";
+    return failure();
+  }
+  Attribute getPropertiesAsAttr(Operation *op) final { return {}; }
+  void copyProperties(OpaqueProperties lhs, OpaqueProperties rhs) final {}
+  bool compareProperties(OpaqueProperties, OpaqueProperties) final { return false; }
+  llvm::hash_code hashProperties(OpaqueProperties prop) final { return {}; }
+
 private:
   DynamicOpDefinition(
       StringRef name, ExtensibleDialect *dialect,
@@ -511,10 +546,7 @@ public:
 
   /// Returns nullptr if the definition was not found.
   DynamicTypeDefinition *lookupTypeDefinition(StringRef name) const {
-    auto it = nameToDynTypes.find(name);
-    if (it == nameToDynTypes.end())
-      return nullptr;
-    return it->second;
+    return nameToDynTypes.lookup(name);
   }
 
   /// Returns nullptr if the definition was not found.
@@ -527,10 +559,7 @@ public:
 
   /// Returns nullptr if the definition was not found.
   DynamicAttrDefinition *lookupAttrDefinition(StringRef name) const {
-    auto it = nameToDynAttrs.find(name);
-    if (it == nameToDynAttrs.end())
-      return nullptr;
-    return it->second;
+    return nameToDynAttrs.lookup(name);
   }
 
   /// Returns nullptr if the definition was not found.

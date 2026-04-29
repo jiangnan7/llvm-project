@@ -16,7 +16,6 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/MemoryOpRemark.h"
 
 using namespace llvm;
@@ -34,7 +33,7 @@ static void tryEmitAutoInitRemark(ArrayRef<Instruction *> Instructions,
       continue;
 
     Function &F = *I->getParent()->getParent();
-    const DataLayout &DL = F.getParent()->getDataLayout();
+    const DataLayout &DL = F.getDataLayout();
     AutoInitRemark Remark(ORE, REMARK_PASS, DL, TLI);
     Remark.visit(I);
   }
@@ -53,13 +52,16 @@ static void runImpl(Function &F, const TargetLibraryInfo &TLI) {
   for (Instruction &I : instructions(F)) {
     if (!I.hasMetadata(LLVMContext::MD_annotation))
       continue;
-    auto Iter = DebugLoc2Annotated.insert({I.getDebugLoc().getAsMDNode(), {}});
-    Iter.first->second.push_back(&I);
+    DebugLoc2Annotated[I.getDebugLoc().getAsMDNode()].push_back(&I);
 
     for (const MDOperand &Op :
          I.getMetadata(LLVMContext::MD_annotation)->operands()) {
-      auto Iter = Mapping.insert({cast<MDString>(Op.get())->getString(), 0});
-      Iter.first->second++;
+      StringRef AnnotationStr =
+          isa<MDString>(Op.get())
+              ? cast<MDString>(Op.get())->getString()
+              : cast<MDString>(cast<MDTuple>(Op.get())->getOperand(0).get())
+                    ->getString();
+      Mapping[AnnotationStr]++;
     }
   }
 

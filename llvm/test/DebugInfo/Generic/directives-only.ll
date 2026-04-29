@@ -10,7 +10,6 @@
 
 
 ; CHECK: .file 1 "/tmp/dbginfo{{.*}}multiline.c"
-; CHECK: .loc 1 2 0
 ; CHECK: .loc 1 3 3
 ; CHECK: .loc 1 3 9
 ; CHECK: .loc 1 3 15
@@ -19,7 +18,7 @@
 ; CHECK: .loc 1 4 15
 ; CHECK: .loc 1 5 1
 
-; CHECK-NOT: .section .{{debug.*}}
+; CHECK-NOT: .section .{{debug_.*}}
 
 ; Function Attrs: nounwind uwtable
 define void @f2() #0 !dbg !4 {

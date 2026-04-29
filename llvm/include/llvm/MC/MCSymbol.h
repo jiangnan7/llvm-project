@@ -13,11 +13,12 @@
 #ifndef LLVM_MC_MCSYMBOL_H
 #define LLVM_MC_MCSYMBOL_H
 
-#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/StringMapEntry.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCFragment.h"
+#include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSymbolTableEntry.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
@@ -62,8 +63,8 @@ protected:
     SymContentsTargetCommon, // Index stores the section index
   };
 
-  // Special sentinal value for the absolute pseudo fragment.
-  static MCFragment *AbsolutePseudoFragment;
+  // Special sentinel value for the absolute pseudo fragment.
+  LLVM_ABI static MCFragment *AbsolutePseudoFragment;
 
   /// If a symbol has a Fragment, the section is implied, so we only need
   /// one pointer.
@@ -76,11 +77,11 @@ protected:
   ///
   /// If this is a fragment, then it gives the fragment this symbol's value is
   /// relative to, if any.
-  ///
-  /// For the 'HasName' integer, this is true if this symbol is named.
-  /// A named symbol will have a pointer to the name allocated in the bytes
-  /// immediately prior to the MCSymbol.
-  mutable PointerIntPair<MCFragment *, 1> FragmentAndHasName;
+  mutable MCFragment *Fragment = nullptr;
+
+  /// True if this symbol is named.  A named symbol will have a pointer to the
+  /// name allocated in the bytes immediately prior to the MCSymbol.
+  unsigned HasName : 1;
 
   /// IsTemporary - True if this is an assembler temporary label, which
   /// typically does not survive in the .o file's symbol table.  Usually
@@ -90,17 +91,17 @@ protected:
   /// True if this symbol can be redefined.
   unsigned IsRedefinable : 1;
 
-  /// IsUsed - True if this symbol has been used.
-  mutable unsigned IsUsed : 1;
-
   mutable unsigned IsRegistered : 1;
 
   /// True if this symbol is visible outside this translation unit. Note: ELF
   /// uses binding instead of this bit.
   mutable unsigned IsExternal : 1;
 
-  /// This symbol is private extern.
+  /// Mach-O specific: This symbol is private extern.
   mutable unsigned IsPrivateExtern : 1;
+
+  /// This symbol is weak external.
+  mutable unsigned IsWeakExternal : 1;
 
   /// LLVM RTTI discriminator. This is actually a SymbolKind enumerator, but is
   /// unsigned to avoid sign extension and achieve better bitpacking with MSVC.
@@ -108,6 +109,9 @@ protected:
 
   /// True if we have created a relocation that uses this symbol.
   mutable unsigned IsUsedInReloc : 1;
+
+  /// Used to detect cyclic dependency like `a = a + 1` and `a = b; b = a`.
+  unsigned IsResolving : 1;
 
   /// This is actually a Contents enumerator, but is unsigned to avoid sign
   /// extension and achieve better bitpacking with MSVC.
@@ -154,25 +158,28 @@ protected:
   /// system, the name is a pointer so isn't going to satisfy the 8 byte
   /// alignment of uint64_t.  Account for that here.
   using NameEntryStorageTy = union {
-    const StringMapEntry<bool> *NameEntry;
+    const MCSymbolTableEntry *NameEntry;
     uint64_t AlignmentPadding;
   };
 
-  MCSymbol(SymbolKind Kind, const StringMapEntry<bool> *Name, bool isTemporary)
-      : IsTemporary(isTemporary), IsRedefinable(false), IsUsed(false),
-        IsRegistered(false), IsExternal(false), IsPrivateExtern(false),
-        Kind(Kind), IsUsedInReloc(false), SymbolContents(SymContentsUnset),
-        CommonAlignLog2(0), Flags(0) {
+  MCSymbol(SymbolKind Kind, const MCSymbolTableEntry *Name, bool isTemporary)
+      : IsTemporary(isTemporary), IsRedefinable(false), IsRegistered(false),
+        IsExternal(false), IsPrivateExtern(false), IsWeakExternal(false),
+        Kind(Kind), IsUsedInReloc(false), IsResolving(0),
+        SymbolContents(SymContentsUnset), CommonAlignLog2(0), Flags(0) {
     Offset = 0;
-    FragmentAndHasName.setInt(!!Name);
+    HasName = !!Name;
     if (Name)
       getNameEntryPtr() = Name;
   }
 
+  MCSymbol(const MCSymbol &) = default;
+  MCSymbol &operator=(const MCSymbol &) = delete;
+
   // Provide custom new/delete as we will only allocate space for a name
   // if we need one.
-  void *operator new(size_t s, const StringMapEntry<bool> *Name,
-                     MCContext &Ctx);
+  LLVM_ABI void *operator new(size_t s, const MCSymbolTableEntry *Name,
+                              MCContext &Ctx);
 
 private:
   void operator delete(void *);
@@ -186,22 +193,19 @@ private:
   }
 
   /// Get a reference to the name field.  Requires that we have a name
-  const StringMapEntry<bool> *&getNameEntryPtr() {
-    assert(FragmentAndHasName.getInt() && "Name is required");
+  const MCSymbolTableEntry *&getNameEntryPtr() {
+    assert(HasName && "Name is required");
     NameEntryStorageTy *Name = reinterpret_cast<NameEntryStorageTy *>(this);
     return (*(Name - 1)).NameEntry;
   }
-  const StringMapEntry<bool> *&getNameEntryPtr() const {
+  const MCSymbolTableEntry *&getNameEntryPtr() const {
     return const_cast<MCSymbol*>(this)->getNameEntryPtr();
   }
 
 public:
-  MCSymbol(const MCSymbol &) = delete;
-  MCSymbol &operator=(const MCSymbol &) = delete;
-
   /// getName - Get the symbol name.
   StringRef getName() const {
-    if (!FragmentAndHasName.getInt())
+    if (!HasName)
       return StringRef();
 
     return getNameEntryPtr()->first();
@@ -219,9 +223,6 @@ public:
   /// isTemporary - Check if this is an assembler temporary symbol.
   bool isTemporary() const { return IsTemporary; }
 
-  /// isUsed - Check if this is used.
-  bool isUsed() const { return IsUsed; }
-
   /// Check if this symbol is redefinable.
   bool isRedefinable() const { return IsRedefinable; }
   /// Mark this symbol as redefinable.
@@ -238,6 +239,9 @@ public:
     }
   }
 
+  bool isResolving() const { return IsResolving; }
+  void setIsResolving(bool V) { IsResolving = V; }
+
   /// @}
   /// \name Associated Sections
   /// @{
@@ -250,13 +254,12 @@ public:
   /// isInSection - Check if this symbol is defined in some section (i.e., it
   /// is defined but not absolute).
   bool isInSection() const {
-    return isDefined() && !isAbsolute();
+    auto *F = getFragment();
+    return F && F != AbsolutePseudoFragment;
   }
 
   /// isUndefined - Check if this symbol undefined (i.e., implicitly defined).
-  bool isUndefined(bool SetUsed = true) const {
-    return getFragment(SetUsed) == nullptr;
-  }
+  bool isUndefined() const { return getFragment() == nullptr; }
 
   /// isAbsolute - Check if this is an absolute symbol.
   bool isAbsolute() const {
@@ -272,11 +275,11 @@ public:
   /// Mark the symbol as defined in the fragment \p F.
   void setFragment(MCFragment *F) const {
     assert(!isVariable() && "Cannot set fragment of variable");
-    FragmentAndHasName.setPointer(F);
+    Fragment = F;
   }
 
   /// Mark the symbol as undefined.
-  void setUndefined() { FragmentAndHasName.setPointer(nullptr); }
+  void setUndefined() { Fragment = nullptr; }
 
   bool isELF() const { return Kind == SymbolKindELF; }
 
@@ -299,14 +302,13 @@ public:
     return SymbolContents == SymContentsVariable;
   }
 
-  /// getVariableValue - Get the value for variable symbols.
-  const MCExpr *getVariableValue(bool SetUsed = true) const {
+  /// Get the expression of the variable symbol.
+  const MCExpr *getVariableValue() const {
     assert(isVariable() && "Invalid accessor!");
-    IsUsed |= SetUsed;
     return Value;
   }
 
-  void setVariableValue(const MCExpr *Value);
+  LLVM_ABI void setVariableValue(const MCExpr *Value);
 
   /// @}
 
@@ -392,26 +394,27 @@ public:
     return SymbolContents == SymContentsTargetCommon;
   }
 
-  MCFragment *getFragment(bool SetUsed = true) const {
-    MCFragment *Fragment = FragmentAndHasName.getPointer();
-    if (Fragment || !isVariable())
+  MCFragment *getFragment() const {
+    if (Fragment || !isVariable() || isWeakExternal())
       return Fragment;
-    Fragment = getVariableValue(SetUsed)->findAssociatedFragment();
-    FragmentAndHasName.setPointer(Fragment);
+    // If the symbol is a non-weak alias, get information about
+    // the aliasee. (Don't try to resolve weak aliases.)
+    Fragment = getVariableValue()->findAssociatedFragment();
     return Fragment;
   }
 
+  // For ELF, use MCSymbolELF::setBinding instead.
   bool isExternal() const { return IsExternal; }
   void setExternal(bool Value) const { IsExternal = Value; }
 
-  bool isPrivateExtern() const { return IsPrivateExtern; }
-  void setPrivateExtern(bool Value) { IsPrivateExtern = Value; }
+  // COFF-specific
+  bool isWeakExternal() const { return IsWeakExternal; }
 
   /// print - Print the value to the stream \p OS.
-  void print(raw_ostream &OS, const MCAsmInfo *MAI) const;
+  LLVM_ABI void print(raw_ostream &OS, const MCAsmInfo *MAI) const;
 
   /// dump - Print the value to stderr.
-  void dump() const;
+  LLVM_ABI void dump() const;
 
 protected:
   /// Get the (implementation defined) symbol flags.
